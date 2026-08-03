@@ -165,7 +165,7 @@
         <!-- 侧边栏 -->
         <div
             class="w-80 h-full bg-[rgba(255,255,255,0.5)] border-r border-black/[0.06] flex flex-col backdrop-blur-[20px]">
-            <div class="px-6 pt-7 pb-5 flex justify-between items-center">
+            <div class="px-6 pt-7 pb-4 flex justify-between items-center">
                 <h2 class="text-2xl font-bold tracking-[-0.01em]">便签</h2>
                 <button
                     class="bg-transparent border-none cursor-pointer w-9 h-9 rounded-full flex items-center justify-center text-[#0071e3] transition-all duration-200 hover:bg-[#0071e3]/10"
@@ -175,6 +175,18 @@
                         <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
                 </button>
+            </div>
+            <!-- 搜索框 -->
+            <div class="px-4 pb-3">
+                <div class="relative">
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-[#86868b] pointer-events-none"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="search-input" placeholder="搜索便签"
+                        class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-3 py-[7px] text-[13px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition-all duration-200">
+                </div>
             </div>
             <div class="flex-1 overflow-y-auto px-4 pb-4" id="note-list">
                 <!-- 动态渲染项 -->
@@ -207,7 +219,6 @@
                                 d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z">
                             </path>
                         </svg>
-                        设置
                     </button>
                     <button
                         class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition-all duration-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-white hover:border-black/10 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
@@ -217,7 +228,6 @@
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                         </svg>
-                        复制
                     </button>
                     <button
                         class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition-all duration-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-[#ff3b30] hover:text-white hover:border-[#ff3b30]"
@@ -228,7 +238,6 @@
                             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
                             </path>
                         </svg>
-                        删除
                     </button>
                     <a href="https://mx2d.cn" target="_blank" rel="noopener noreferrer"
                         class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium no-underline inline-flex items-center gap-1.5 text-[#0071e3] transition-all duration-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-white hover:border-black/10 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
@@ -243,22 +252,24 @@
                 </div>
             </div>
 
-            <div id="active-editor" class="hidden h-full flex-col px-[60px] pt-[40px]">
-                <!-- AI 状态指示：左侧顶部 -->
-                <div class="flex items-center gap-1.5 pb-3 text-[13px] text-[#86868b]" id="ai-status">
-                    <span id="ai-dot" class="inline-block w-[6px] h-[6px] rounded-full bg-[#86868b]"></span>
-                    <span id="ai-text">AI 总结已关闭</span>
-                </div>
+            <div id="active-editor" class=" h-full flex-col px-[60px] h-screen overflow-auto">
                 <div class="flex-1 flex flex-col gap-4 overflow-hidden">
                     <input type="text"
-                        class="text-[32px] font-bold border-none bg-transparent outline-none text-[#1d1d1f] tracking-[-0.02em] placeholder-[#c7c7cc]"
+                        class="text-[32px]  pt-[12px] font-bold border-none bg-transparent outline-none text-[#1d1d1f] tracking-[-0.02em] placeholder-[#c7c7cc]"
                         id="note-title" placeholder="无标题">
                     <!-- Quill 富文本挂载容器 -->
-                    <div id="editor-container" class="flex-1 bg-transparent border-none flex flex-col overflow-hidden">
+                    <div id="editor-container" class="flex-1 bg-transparent border-none flex flex-col overflow-auto">
                     </div>
                 </div>
-                <!-- 右下角字数统计 -->
-                <div class="flex justify-end pt-3 pr-0 pb-[40px] text-[13px] text-[#86868b]" id="word-count">0 字</div>
+                <!-- 右下角 AI 状态与字数统计 -->
+                <div
+                    class="flex justify-between items-center text-[13px] text-[#86868b] absolute bottom-8 right-8 gap-4">
+                    <div class="flex items-center gap-1.5" id="ai-status">
+                        <span id="ai-dot" class="inline-block w-[6px] h-[6px] rounded-full bg-[#86868b]"></span>
+                        <span id="ai-text">AI 总结已关闭</span>
+                    </div>
+                    <div id="word-count" class="ml-4">0 字</div>
+                </div>
             </div>
 
             <div class="flex-1 h-full flex flex-col items-center justify-center text-[#86868b] gap-3" id="empty-state">
@@ -337,6 +348,8 @@
 
     <!-- Quill.js 富文本编辑器 JS -->
     <script src="https://cdn.jsdelivr.net/npm/quill@1.3.7/dist/quill.min.js"></script>
+    <!-- 图片缩放模块：加载后自动注册到 window.Quill，无需手动 register -->
+    <script src="https://cdn.jsdelivr.net/npm/quill-image-resize-module@3.0.0/image-resize.min.js"></script>
     <script>
         // 初始化 Quill 富文本编辑器
         const quill = new Quill('#editor-container', {
@@ -351,7 +364,9 @@
                     [{ color: [] }, { background: [] }],
                     ['image'],
                     ['clean']
-                ]
+                ],
+                // 图片缩放：点击图片后出现拖拽手柄
+                imageResize: {}
             }
         });
 
@@ -398,6 +413,9 @@
         const aiSummaryToggle = document.getElementById('ai-summary-toggle');
         const wordCountEl = document.getElementById('word-count');
         const actionBar = document.getElementById('action-bar');
+        const searchInput = document.getElementById('search-input');
+        // 搜索关键词（统一转小写，便于匹配）
+        let searchKeyword = '';
 
         // 更新 AI 状态显示（dot 颜色 + 文字）
         function updateAIStatus(text, dotColor) {
@@ -437,7 +455,25 @@
                 return a.order - b.order;
             });
 
-            notes.forEach(note => {
+            // 搜索过滤：匹配标题或内容纯文本
+            const filteredNotes = notes.filter(note => {
+                if (!searchKeyword) return true;
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = note.body;
+                const plainText = (tempDiv.textContent || tempDiv.innerText || '').toLowerCase();
+                const titleText = (note.title || '').toLowerCase();
+                return titleText.includes(searchKeyword) || plainText.includes(searchKeyword);
+            });
+
+            // 空列表提示
+            if (filteredNotes.length === 0) {
+                noteListEl.innerHTML = `<div class="text-center text-[13px] text-[#86868b] py-10">${searchKeyword ? '未找到匹配的便签' : '暂无便签'}</div>`;
+                bindDragSort();
+                renderEditor();
+                return;
+            }
+
+            filteredNotes.forEach(note => {
                 const item = document.createElement('div');
                 const isActive = note.id === currentNoteId;
                 item.className = `p-4 rounded-xl cursor-pointer mb-2 transition-all duration-200 ease-[cubic-bezier(0.25,1,0.5,1)] relative flex justify-between items-center ${isActive ? 'bg-white shadow-[0_4px_16px_rgba(0,0,0,0.04)]' : 'bg-transparent hover:bg-white/60 group'}`;
@@ -854,10 +890,82 @@
 
         // ========== 图片上传功能 ==========
 
+        // 加载图片文件为 HTMLImageElement
+        function loadImageEl(file) {
+            return new Promise((resolve, reject) => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+                img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+                img.src = url;
+            });
+        }
+
+        // 将图片转换为 WebP 格式以减小存储体积
+        // SVG（矢量）与 GIF（动画）保留原格式，避免转换副作用
+        async function convertToWebp(file, quality = 0.85) {
+            if (file.type === 'image/svg+xml' || file.type === 'image/gif' || file.type === 'image/webp') {
+                return file;
+            }
+            try {
+                const img = await loadImageEl(file);
+                // 超大图等比缩放，避免 canvas 溢出并进一步压缩
+                const MAX_DIMENSION = 4096;
+                let w = img.naturalWidth;
+                let h = img.naturalHeight;
+                if (w > MAX_DIMENSION || h > MAX_DIMENSION) {
+                    const scale = MAX_DIMENSION / Math.max(w, h);
+                    w = Math.round(w * scale);
+                    h = Math.round(h * scale);
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, w, h);
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', quality));
+                if (!blob) return file;
+                const baseName = (file.name || 'image').replace(/\.[^.]+$/, '');
+                return new File([blob], `${baseName}.webp`, { type: 'image/webp' });
+            } catch (e) {
+                console.error('WebP 转换失败，回退原文件:', e);
+                return file;
+            }
+        }
+
+        // 限制新插入图片显示宽度：若自然宽度超过编辑器容器一半，则缩至一半
+        function constrainInsertedImage(url) {
+            const probe = new Image();
+            probe.onload = () => {
+                const containerWidth = quill.root.clientWidth;
+                const halfWidth = Math.round(containerWidth / 2);
+                if (halfWidth > 0 && probe.naturalWidth > halfWidth) {
+                    const target = quill.root.querySelector(`img[src="${url}"]`);
+                    if (target) {
+                        target.style.width = halfWidth + 'px';
+                        target.style.height = 'auto';
+                        // style 变更不触发 Quill text-change，手动同步保存
+                        if (!currentNoteId) return;
+                        const note = notes.find(n => n.id === currentNoteId);
+                        if (note) {
+                            note.body = quill.root.innerHTML;
+                            note.updatedAt = Date.now();
+                            saveNotes();
+                        }
+                    }
+                }
+            };
+            probe.onerror = () => { /* 探测失败则保持原尺寸 */ };
+            probe.src = url;
+        }
+
         // 通用图片上传函数：接收 File/Blob 对象，上传到服务器并插入 Quill
         async function uploadImageToServer(file) {
+            // 转换为 WebP 格式（SVG/GIF 保留原格式）
+            const uploadFile = await convertToWebp(file);
+
             const formData = new FormData();
-            formData.append('image', file);
+            formData.append('image', uploadFile);
 
             try {
                 const response = await fetch('/api/upload', {
@@ -870,6 +978,8 @@
                     const range = quill.getSelection(true);
                     quill.insertEmbed(range.index, 'image', data.url);
                     quill.setSelection(range.index + 1);
+                    // 超大图缩至容器一半，仍可拖拽手柄调整
+                    constrainInsertedImage(data.url);
                 } else {
                     showToastMsg(data.error || '图片上传失败');
                 }
@@ -1050,6 +1160,12 @@
                 currentNoteId = notes.length > 0 ? notes[0].id : null;
             }
         }
+
+        // ========== 搜索过滤 ==========
+        searchInput.oninput = () => {
+            searchKeyword = searchInput.value.trim().toLowerCase();
+            renderList();
+        };
 
         // 初始化运行
         renderList();
