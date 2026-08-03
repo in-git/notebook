@@ -62,6 +62,82 @@
             animation: pulse 1s infinite alternate;
         }
 
+        /* AI 状态小圆点 */
+        #ai-dot {
+            transition: background-color 0.3s ease;
+        }
+
+        #ai-dot.ai-loading-dot {
+            width: 6px;
+            height: 6px;
+            background: #0071e3;
+            animation: pulse 1s infinite alternate;
+        }
+
+        /* AI 总结按钮 loading 旋转动画 */
+        @keyframes aiSpin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .ai-btn-loading svg {
+            animation: aiSpin 1s linear infinite;
+        }
+
+        .ai-btn-loading {
+            opacity: 0.7;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        /* 标题 loading 骨架屏闪烁 */
+        @keyframes shimmer {
+            0% {
+                background-position: -200% 0;
+            }
+
+            100% {
+                background-position: 200% 0;
+            }
+        }
+
+        .title-shimmer {
+            background: linear-gradient(90deg, transparent 30%, rgba(99, 102, 241, 0.08) 50%, transparent 70%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s ease-in-out infinite;
+            border-radius: 6px;
+        }
+
+        /* 拖拽排序样式 */
+        .note-item-dragging {
+            opacity: 0.4 !important;
+            transform: scale(0.97);
+        }
+
+        .note-drop-indicator {
+            height: 3px;
+            background: #0071e3;
+            border-radius: 2px;
+            margin: -1px 0;
+            pointer-events: none;
+            animation: dropIndicatorPulse 0.8s ease-in-out infinite alternate;
+        }
+
+        @keyframes dropIndicatorPulse {
+            0% {
+                opacity: 0.6;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
         /* 自定义滚动条 */
         ::-webkit-scrollbar {
             width: 6px;
@@ -111,6 +187,17 @@
             <div id="action-bar" class="absolute top-4 right-4 z-10 bg-[rgba(255,255,255,0.75)]   hidden">
                 <div class="flex justify-end gap-3 items-center">
                     <button
+                        class="bg-gradient-to-r from-[#e0e7ff] to-[#ede9fe] border border-[#c7d2fe]/60 px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#6366f1] transition-all duration-200 shadow-[0_1px_3px_rgba(99,102,241,0.08)] hover:from-[#d0d8ff] hover:to-[#ddd6fe] hover:border-[#a5b4fc]/60 hover:shadow-[0_2px_8px_rgba(99,102,241,0.15)]"
+                        id="ai-summary-btn" title="AI 总结标题">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                            <path d="M2 17l10 5 10-5"></path>
+                            <path d="M2 12l10 5 10-5"></path>
+                        </svg>
+                        AI 总结
+                    </button>
+                    <button
                         class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition-all duration-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-white hover:border-black/10 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
                         id="settings-btn" title="设置">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -130,7 +217,7 @@
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                         </svg>
-                        一键复制
+                        复制
                     </button>
                     <button
                         class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition-all duration-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-[#ff3b30] hover:text-white hover:border-[#ff3b30]"
@@ -157,10 +244,10 @@
             </div>
 
             <div id="active-editor" class="hidden h-full flex-col px-[60px] pt-[40px]">
-                <!-- AI 状态指示：左侧顶部，绿/灰圆点 -->
-                <div class="flex items-center gap-2 pb-3 text-[13px] text-[#86868b]" id="ai-status">
-                    <span id="ai-dot" class="inline-block w-2 h-2 rounded-full bg-[#34c759]"></span>
-                    <span id="ai-text">AI 就绪</span>
+                <!-- AI 状态指示：左侧顶部 -->
+                <div class="flex items-center gap-1.5 pb-3 text-[13px] text-[#86868b]" id="ai-status">
+                    <span id="ai-dot" class="inline-block w-[6px] h-[6px] rounded-full bg-[#86868b]"></span>
+                    <span id="ai-text">AI 总结已关闭</span>
                 </div>
                 <div class="flex-1 flex flex-col gap-4 overflow-hidden">
                     <input type="text"
@@ -191,6 +278,27 @@
     <!-- 复制成功反馈 Toast -->
     <div class="absolute bottom-10 left-1/2 -translate-x-1/2 translate-y-[100px] bg-black/80 text-white px-6 py-3 rounded-full text-sm backdrop-blur-[10px] transition-transform duration-300 ease-[cubic-bezier(0.175,0.885,0.32,1.275)] pointer-events-none z-[1000]"
         id="toast">已复制纯文本到剪贴板</div>
+
+    <!-- 自定义提示弹窗 -->
+    <div id="custom-alert"
+        class="absolute inset-0 bg-black/30 backdrop-blur-[4px] flex items-center justify-center z-[300] transition-opacity duration-200 opacity-0 pointer-events-none">
+        <div
+            class="bg-white/95 backdrop-blur-[20px] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.12)] w-[320px] overflow-hidden">
+            <div class="px-6 pt-6 pb-2 text-center">
+                <div class="text-[15px] font-medium text-[#1d1d1f] leading-relaxed" id="custom-alert-title">提示</div>
+            </div>
+            <div class="px-6 pb-2 text-center">
+                <div class="text-[13px] text-[#86868b] leading-relaxed" id="custom-alert-message">内容不足 10 个字，无法生成有意义的总结
+                </div>
+            </div>
+            <div class="px-6 pb-5 pt-3 flex justify-center">
+                <button id="custom-alert-ok"
+                    class="bg-[#0071e3] text-white border-none px-8 py-2.5 rounded-xl text-[15px] font-medium cursor-pointer transition-all duration-200 hover:bg-[#0062cc] min-w-[120px]">
+                    好的
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- 设置模态框 -->
     <div id="settings-modal"
@@ -251,10 +359,11 @@
         let notes = JSON.parse(localStorage.getItem('apple_notes_data_ai')) || [
             { id: 1, title: '欢迎使用 AI 智能便签', body: '<p>这是一个全屏无边界、集成富文本与 AI 自动总结标题的 Apple 风格应用。</p><p>尝试在此修改内容，AI 将在内容变动后自动为您生成合适的标题（1分钟最多触发一次）。</p>', updatedAt: Date.now(), pinned: false, createdAt: Date.now() }
         ];
-        // 为旧数据补充 createdAt 和 pinned 字段
-        notes.forEach(n => {
-            if (!n.createdAt) n.createdAt = n.id; // id 本身就是 Date.now()
+        // 为旧数据补充 createdAt、pinned、order 字段
+        notes.forEach((n, i) => {
+            if (!n.createdAt) n.createdAt = n.id;
             if (n.pinned === undefined) n.pinned = false;
+            if (n.order === undefined) n.order = i;
         });
         let currentNoteId = notes.length > 0 ? notes[0].id : null;
         let isInternalUpdate = false;
@@ -264,6 +373,9 @@
 
         // 内容变化检测：记录每个便签上次提交给 AI 的纯文本内容 { [noteId]: string }
         let lastSubmittedContent = {};
+
+        // AI 总结进行中锁：防止并发触发
+        let aiSummaryInProgress = false;
 
         // 用户手动修改标题标记：记录哪些便签的标题是用户手动改过的 { [noteId]: boolean }
         let manuallyTitledNotes = {};
@@ -291,12 +403,12 @@
         function updateAIStatus(text, dotColor) {
             aiTextEl.textContent = text;
             if (dotColor) {
-                aiDotEl.className = `inline-block w-2 h-2 rounded-full bg-[${dotColor}]`;
+                aiDotEl.className = `inline-block w-[6px] h-[6px] rounded-full bg-[${dotColor}]`;
             }
         }
 
         // AI 配置（从 localStorage 读取，默认开启）
-        let aiConfig = JSON.parse(localStorage.getItem('ai_config')) || { summaryEnabled: true };
+        let aiConfig = JSON.parse(localStorage.getItem('ai_config')) || { summaryEnabled: false };
         aiSummaryToggle.checked = aiConfig.summaryEnabled;
 
         // 保存 AI 配置
@@ -319,16 +431,18 @@
         // 渲染左侧列表
         function renderList() {
             noteListEl.innerHTML = '';
-            // 置顶优先，然后按创建时间倒序（新建在前）
+            // 置顶优先，然后按 order 排序（拖拽自定义顺序）
             notes.sort((a, b) => {
-                if (a.pinned !== b.pinned) return b.pinned ? 1 : -1; // 置顶排前面
-                return b.createdAt - a.createdAt; // 新建排前面
+                if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+                return a.order - b.order;
             });
 
             notes.forEach(note => {
                 const item = document.createElement('div');
                 const isActive = note.id === currentNoteId;
                 item.className = `p-4 rounded-xl cursor-pointer mb-2 transition-all duration-200 ease-[cubic-bezier(0.25,1,0.5,1)] relative flex justify-between items-center ${isActive ? 'bg-white shadow-[0_4px_16px_rgba(0,0,0,0.04)]' : 'bg-transparent hover:bg-white/60 group'}`;
+                item.draggable = true;
+                item.dataset.noteId = note.id;
                 item.onclick = () => selectNote(note.id);
 
                 const tempDiv = document.createElement('div');
@@ -355,6 +469,9 @@
                 `;
                 noteListEl.appendChild(item);
             });
+
+            // 绑定拖拽排序事件
+            bindDragSort();
 
             renderEditor();
         }
@@ -385,13 +502,13 @@
 
         // 切换当前便签
         function selectNote(id) {
-            // 切换前，若当前便签内容有变化，触发一次 AI 总结
+            // 切换前，触发一次 AI 总结
             if (currentNoteId && currentNoteId !== id) {
                 const currentNote = notes.find(n => n.id === currentNoteId);
                 if (currentNote) {
                     const tempDiv = document.createElement('div');
                     tempDiv.innerHTML = currentNote.body;
-                    const plainText = tempDiv.textContent || tempDiv.innerText || '';
+                    const plainText = (tempDiv.textContent || tempDiv.innerText || '').trim();
                     triggerAISummary(currentNoteId, plainText);
                 }
             }
@@ -402,13 +519,15 @@
         // 新建便签
         newNoteBtn.onclick = () => {
             const now = Date.now();
+            const minOrder = notes.length > 0 ? Math.min(...notes.map(n => n.order)) : 0;
             const newNote = {
                 id: now,
                 title: '',
                 body: '',
                 updatedAt: now,
                 createdAt: now,
-                pinned: false
+                pinned: false,
+                order: minOrder - 1
             };
             notes.unshift(newNote);
             currentNoteId = newNote.id;
@@ -432,36 +551,50 @@
         };
 
         // 调用 AI 总结标题接口
-        async function triggerAISummary(noteId, textContent) {
+        // force: true 时跳过开关检查（按钮手动触发）
+        async function triggerAISummary(noteId, textContent, force = false) {
             if (!textContent.trim()) return;
 
-            // AI 开关检查：未开启则不触发
-            if (!aiConfig.summaryEnabled) {
+            // 防止并发触发：如果上一轮 AI 总结尚未完成，直接跳过
+            if (aiSummaryInProgress) return;
+
+            // AI 开关检查：未开启且非强制触发则不执行
+            if (!force && !aiConfig.summaryEnabled) {
                 updateAIStatus("AI 总结已关闭", "#86868b");
                 return;
             }
 
-            // 用户手动修改过标题，AI 不覆盖
-            if (manuallyTitledNotes[noteId]) return;
+            // 用户手动修改过标题，且非强制触发时，AI 不覆盖
+            if (!force && manuallyTitledNotes[noteId]) return;
 
-            // 内容变化检测：与上次提交的内容比对，未变则跳过
-            if (lastSubmittedContent[noteId] === textContent.trim()) return;
+            // 内容变化检测：与上次提交的内容比对，未变则跳过（强制触发时跳过此检查）
+            if (!force && lastSubmittedContent[noteId] === textContent.trim()) return;
 
             const now = Date.now();
             const lastTriggerTime = aiThrottleMap[noteId] || 0;
             const cooldown = 15 * 1000; // 15秒
 
-            // 检查冷却时间
-            if (now - lastTriggerTime < cooldown) {
+            // 检查冷却时间（强制触发时跳过）
+            if (!force && now - lastTriggerTime < cooldown) {
                 return;
             }
 
             // 更新冷却时间戳
             aiThrottleMap[noteId] = now;
 
+            // 设置进行中锁
+            aiSummaryInProgress = true;
+
             // 更新UI状态为AI处理中
             updateAIStatus("AI 正在总结标题...", "#0071e3");
             aiDotEl.className = "inline-block w-2 h-2 rounded-full ai-loading-dot";
+
+            // AI 总结按钮进入 loading 状态
+            aiSummaryBtn.classList.add('ai-btn-loading');
+            aiSummaryBtn.querySelector('svg').innerHTML = '<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" opacity=".3"/><path d="M12 2a10 10 0 0 1 10 10h-2a8 8 0 0 0-8-8z"/>';
+
+            // 标题输入框添加 shimmer 闪烁效果
+            titleInputEl.classList.add('title-shimmer');
 
             try {
                 const response = await fetch("/api/summarize", {
@@ -503,6 +636,16 @@
             } catch (error) {
                 console.error("AI 总结失败:", error);
                 updateAIStatus("AI 服务开小差了", "#ff3b30");
+            } finally {
+                // 释放进行中锁
+                aiSummaryInProgress = false;
+
+                // 恢复 AI 总结按钮
+                aiSummaryBtn.classList.remove('ai-btn-loading');
+                aiSummaryBtn.querySelector('svg').innerHTML = '<path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path>';
+
+                // 移除标题 shimmer 效果
+                titleInputEl.classList.remove('title-shimmer');
             }
         }
 
@@ -532,12 +675,121 @@
 
             const note = notes.find(n => n.id === currentNoteId);
             if (note) {
+                // 先从 Quill 实时读取当前内容（避免 text-change 尚未同步）
+                const currentBody = quill.root.innerHTML;
+                note.body = currentBody;
+                note.updatedAt = Date.now();
+                saveNotes();
+
                 const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = note.body;
-                const plainText = tempDiv.textContent || tempDiv.innerText || '';
+                tempDiv.innerHTML = currentBody;
+                const plainText = (tempDiv.textContent || tempDiv.innerText || '').trim();
+
                 triggerAISummary(currentNoteId, plainText);
             }
         });
+
+        // ========== 拖拽排序 ==========
+        let dragSourceId = null;
+        let dropIndicatorEl = null;
+
+        function bindDragSort() {
+            const items = noteListEl.querySelectorAll('[data-note-id]');
+
+            items.forEach(item => {
+                item.addEventListener('dragstart', onDragStart);
+                item.addEventListener('dragend', onDragEnd);
+                item.addEventListener('dragover', onDragOver);
+                item.addEventListener('drop', onDrop);
+            });
+        }
+
+        function onDragStart(event) {
+            dragSourceId = this.dataset.noteId;
+            this.classList.add('note-item-dragging');
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', dragSourceId);
+        }
+
+        function onDragEnd() {
+            this.classList.remove('note-item-dragging');
+            dragSourceId = null;
+            removeDropIndicator();
+        }
+
+        function onDragOver(event) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+
+            const targetId = this.dataset.noteId;
+            if (targetId === dragSourceId) return;
+
+            // 显示放置指示线
+            const rect = this.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            const isBefore = event.clientY < midY;
+
+            removeDropIndicator();
+            dropIndicatorEl = document.createElement('div');
+            dropIndicatorEl.className = 'note-drop-indicator';
+
+            if (isBefore) {
+                this.parentNode.insertBefore(dropIndicatorEl, this);
+            } else {
+                this.parentNode.insertBefore(dropIndicatorEl, this.nextSibling);
+            }
+        }
+
+        function onDrop(event) {
+            event.preventDefault();
+            removeDropIndicator();
+
+            const targetId = this.dataset.noteId;
+            if (!dragSourceId || targetId === dragSourceId) return;
+
+            const sourceNote = notes.find(n => String(n.id) === String(dragSourceId));
+            const targetNote = notes.find(n => String(n.id) === String(targetId));
+            if (!sourceNote || !targetNote) return;
+
+            // 不允许跨置顶/非置顶拖拽（置顶区与非置顶区保持分离）
+            if (sourceNote.pinned !== targetNote.pinned) return;
+
+            // 计算放置位置（上半部分=插入目标前，下半部分=插入目标后）
+            const rect = this.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            const isBefore = event.clientY < midY;
+
+            // 重新排列 notes 数组
+            // 先按当前 order 排序
+            notes.sort((a, b) => {
+                if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+                return a.order - b.order;
+            });
+
+            // 从数组中移除源便签
+            const sourceIdx = notes.findIndex(n => n.id === sourceNote.id);
+            notes.splice(sourceIdx, 1);
+
+            // 找到目标位置
+            let targetIdx = notes.findIndex(n => n.id === targetNote.id);
+            if (!isBefore) targetIdx += 1;
+
+            // 插入到目标位置
+            notes.splice(targetIdx, 0, sourceNote);
+
+            // 重新计算 order 值
+            notes.forEach((n, i) => { n.order = i; });
+
+            saveNotes();
+            renderList();
+        }
+
+        function removeDropIndicator() {
+            if (dropIndicatorEl && dropIndicatorEl.parentNode) {
+                dropIndicatorEl.parentNode.removeChild(dropIndicatorEl);
+            }
+            dropIndicatorEl = null;
+        }
 
         // 列表侧边栏置顶切换
         function togglePin(event, id) {
@@ -690,6 +942,60 @@
             }, 2000);
         }
 
+        // ========== AI 总结按钮 ==========
+        const aiSummaryBtn = document.getElementById('ai-summary-btn');
+        aiSummaryBtn.onclick = () => {
+            if (!currentNoteId) return;
+            // 防止进行中重复触发
+            if (aiSummaryInProgress) {
+                showToastMsg('AI 总结进行中，请稍候');
+                return;
+            }
+            const note = notes.find(n => n.id === currentNoteId);
+            if (!note) return;
+
+            // 检查内容
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = note.body;
+            const plainText = (tempDiv.textContent || tempDiv.innerText || '').trim();
+
+            if (!plainText) {
+                showCustomAlert('无法总结', '便签内容为空，请先输入内容后再使用 AI 总结');
+                return;
+            }
+
+            if (plainText.length < 10) {
+                showCustomAlert('内容太短', '当前仅 ' + plainText.length + ' 个字，至少需要 10 个字才能生成有意义的总结');
+                return;
+            }
+
+            // 强制触发：跳过开关、节流、内容比对、手动标题标记
+            triggerAISummary(currentNoteId, plainText, true);
+        };
+
+        // ========== 自定义提示弹窗 ==========
+        const customAlertEl = document.getElementById('custom-alert');
+        const customAlertTitleEl = document.getElementById('custom-alert-title');
+        const customAlertMessageEl = document.getElementById('custom-alert-message');
+        const customAlertOkBtn = document.getElementById('custom-alert-ok');
+
+        function showCustomAlert(title, message) {
+            customAlertTitleEl.textContent = title;
+            customAlertMessageEl.textContent = message;
+            customAlertEl.classList.remove('opacity-0', 'pointer-events-none');
+            customAlertEl.classList.add('opacity-100', 'pointer-events-auto');
+        }
+
+        function closeCustomAlert() {
+            customAlertEl.classList.remove('opacity-100', 'pointer-events-auto');
+            customAlertEl.classList.add('opacity-0', 'pointer-events-none');
+        }
+
+        customAlertOkBtn.onclick = closeCustomAlert;
+        customAlertEl.onclick = (event) => {
+            if (event.target === customAlertEl) closeCustomAlert();
+        };
+
         // ========== 设置模态框交互 ==========
 
         function openSettings() {
@@ -714,17 +1020,35 @@
         aiSummaryToggle.onchange = () => {
             aiConfig.summaryEnabled = aiSummaryToggle.checked;
             saveAiConfig();
-            // 更新 AI 状态显示
             if (aiConfig.summaryEnabled) {
-                aiStatusEl.textContent = "AI 就绪";
+                updateAIStatus("AI 就绪", "#34c759");
             } else {
-                aiStatusEl.textContent = "AI 总结已关闭";
+                updateAIStatus("AI 总结已关闭", "#86868b");
             }
         };
 
         // 初始化 AI 状态显示
-        if (!aiConfig.summaryEnabled) {
-            aiStatusEl.textContent = "AI 总结已关闭";
+        if (aiConfig.summaryEnabled) {
+            updateAIStatus("AI 就绪", "#34c759");
+        } else {
+            updateAIStatus("AI 总结已关闭", "#86868b");
+        }
+
+        // 启动时自动移除空标题且空内容的便签
+        const beforeCount = notes.length;
+        notes = notes.filter(n => {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = n.body;
+            const plainText = (tempDiv.textContent || tempDiv.innerText || '').trim();
+            const titleText = (n.title || '').trim();
+            return titleText || plainText; // 保留至少有标题或内容的便签
+        });
+        if (notes.length !== beforeCount) {
+            saveNotes();
+            // 若当前选中的便签已被清理，切换到第一个
+            if (currentNoteId && !notes.find(n => n.id === currentNoteId)) {
+                currentNoteId = notes.length > 0 ? notes[0].id : null;
+            }
         }
 
         // 初始化运行
