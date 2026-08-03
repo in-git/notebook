@@ -53,11 +53,12 @@ app.post('/api/summarize', async (req, res) => {
     }
 
     try {
-        const response = await fetch('https://ac2a2be1e22709fa5.bj5.agentos-app.net/v1/chat/completions', {
+        const response = await fetch('https://a46120a2561f5ff2c.gz1.agentos-app.net/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'qwen25vl',
+                model: 'qwen2.5:3b',
+                stream: false,
                 messages: [
                     {
                         role: 'system',
@@ -76,7 +77,7 @@ app.post('/api/summarize', async (req, res) => {
         }
 
         const data = await response.json();
-        const title = data.choices?.[0]?.message?.content?.trim();
+        const title = data.message?.content?.trim();
 
         if (title) {
             res.json({ title: title.replace(/^["']|["']$/g, '') });
