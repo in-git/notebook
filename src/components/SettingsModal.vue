@@ -3,51 +3,219 @@ import {
   Check,
   Close,
   Lock,
+  Message,
+  Phone,
   PreviewCloseOne,
   PreviewOpen,
+  Refresh,
   Setting,
   SwitchButton,
   User,
 } from '@icon-park/vue-next';
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
+import { ApiError, authApi } from '../lib/api';
+import {
+  getBusinessApiBase,
+  setBusinessApiBase,
+} from '../lib/storage';
 import type { User as UserType } from '../types/note';
 
 const props = defineProps<{
   show: boolean;
   summaryEnabled: boolean;
-  authMode: 'login' | 'register';
-  authUsername: string;
-  authPassword: string;
   currentUser: UserType | null;
-  authLoading: boolean;
-  authError: string;
+  cloudMode: boolean;
+  rememberedAccount: string | null;
 }>();
 
-const emit = defineEmits([
-  'update:summaryEnabled',
-  'update:authMode',
-  'update:authUsername',
-  'update:authPassword',
-  'close',
-  'saveConfig',
-  'submitAuth',
-  'logout',
-]);
+const emit = defineEmits<{
+  (e: 'update:summaryEnabled', value: boolean): void;
+  (e: 'close'): void;
+  (e: 'saveConfig'): void;
+  (e: 'submitAuth', params: {
+    mode: 'login' | 'register';
+    channel: 'account' | 'phone' | 'email';
+    account: string;
+    password?: string;
+    validCode?: string;
+    validCodeReqNo?: string;
+    rememberAccount: boolean;
+    businessApiBase?: string;
+  }): void;
+  (e: 'logout'): void;
+}>();
 
+// ========== 本地状态 ==========
+const channel = ref<'account' | 'phone' | 'email'>('account');
 const showPassword = ref(false);
+const account = ref(props.rememberedAccount || '');
+const password = ref('');
+const validCode = ref(''); // 图形/短信/邮箱 验证码
+const validCodeReqNo = ref(''); // 验证码请求号（来自后端返回）
+const rememberMe = ref(false);
+const captchaImage = ref(''); // 图形验证码 base64
+const captchaOpen = ref(false); // 是否启用图形验证码
+const businessApiBase = ref(getBusinessApiBase());
+const authError = ref('');
+const authLoading = ref(false);
 
-// 切换登录/注册时清空错误
-watch(
-  () => props.authMode,
-  () => {
-    // 切换模式时保留输入便于用户切换
-  },
+// 倒计时（短信/邮箱 60s）
+const sendCooldown = ref(0);
+let cooldownTimer: number | null = null;
+const startCooldown = (seconds: number) => {
+  sendCooldown.value = seconds;
+  if (cooldownTimer) clearInterval(cooldownTimer);
+  cooldownTimer = window.setInterval(() => {
+    sendCooldown.value -= 1;
+    if (sendCooldown.value <= 0 && cooldownTimer) {
+      clearInterval(cooldownTimer);
+      cooldownTimer = null;
+    }
+  }, 1000);
+};
+onUnmounted(() => {
+  if (cooldownTimer) clearInterval(cooldownTimer);
+});
+
+// ========== 校验正则（对接文档第七章） ==========
+const PHONE_RE = /^(13[0-9]|14[579]|15[0-3,5-9]|16[6]|17[0135678]|18[0-9]|19[89])\d{8}$/;
+const EMAIL_RE = /^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+)+$/;
+
+const isAccountValid = computed(() => {
+  if (channel.value === 'phone') return PHONE_RE.test(account.value);
+  if (channel.value === 'email') return EMAIL_RE.test(account.value);
+  // 账号登录对接文档未限制具体规则，至少 1 位即可
+  return account.value.trim().length > 0;
+});
+
+const isPasswordValid = computed(() => {
+  if (channel.value !== 'account') return true;
+  return password.value.length >= 6;
+});
+
+const isValidCodeFilled = computed(() => {
+  if (channel.value === 'account' && captchaOpen.value) return validCode.value.length > 0;
+  if (channel.value === 'phone' || channel.value === 'email') return validCode.value.length >= 4;
+  return true;
+});
+
+const canSubmit = computed(
+  () =>
+    !authLoading.value &&
+    isAccountValid.value &&
+    isPasswordValid.value &&
+    isValidCodeFilled.value,
 );
+
+const channelLabels: Record<typeof channel.value, string> = {
+  account: '账号',
+  phone: '手机号',
+  email: '邮箱',
+};
 
 const isLoggedIn = computed(() => !!props.currentUser);
 const usernameInitial = computed(() => {
   const u = props.currentUser?.username || '?';
   return u.charAt(0).toUpperCase();
+});
+
+// ========== 切换 channel 重置状态 ==========
+const resetForm = () => {
+  password.value = '';
+  validCode.value = '';
+  validCodeReqNo.value = '';
+  authError.value = '';
+  captchaImage.value = '';
+};
+
+watch(channel, () => {
+  resetForm();
+});
+
+// 打开时初始化业务 baseURL 显示
+watch(
+  () => props.show,
+  (v) => {
+    if (v) {
+      businessApiBase.value = getBusinessApiBase();
+    }
+  },
+);
+
+// ========== 业务 baseURL 失焦保存 ==========
+const onBusinessBaseBlur = () => {
+  setBusinessApiBase(businessApiBase.value.trim());
+};
+
+// ========== 图形验证码 ==========
+const loadPicCaptcha = async () => {
+  try {
+    const data = (await authApi.getPicCaptcha()) as {
+      validCodeReqNo?: string;
+      captcha?: string;
+      // 也兼容直接字段
+      reqNo?: string;
+      img?: string;
+      image?: string;
+    };
+    validCodeReqNo.value = data?.validCodeReqNo || data?.reqNo || '';
+    captchaImage.value = data?.captcha || data?.img || data?.image || '';
+  } catch (e) {
+    const msg = e instanceof ApiError ? e.message : '获取图形验证码失败';
+    authError.value = msg;
+  }
+};
+
+// ========== 发送验证码（短信 / 邮箱） ==========
+const sendValidCode = async () => {
+  if (sendCooldown.value > 0) return;
+  if (!isAccountValid.value) {
+    authError.value = `请输入正确的${channelLabels[channel.value]}`;
+    return;
+  }
+  authError.value = '';
+  try {
+    if (channel.value === 'phone') {
+      await authApi.getPhoneValidCode(account.value);
+    } else if (channel.value === 'email') {
+      await authApi.getEmailValidCode(account.value);
+    }
+    startCooldown(60);
+  } catch (e) {
+    const msg = e instanceof ApiError ? e.message : '验证码发送失败';
+    authError.value = msg;
+  }
+};
+
+// ========== 提交登录 ==========
+const onSubmit = async () => {
+  if (!canSubmit.value) return;
+  authError.value = '';
+  authLoading.value = true;
+  try {
+    emit('submitAuth', {
+      mode: 'login',
+      channel: channel.value,
+      account: account.value.trim(),
+      password: password.value || undefined,
+      validCode: validCode.value || undefined,
+      validCodeReqNo: validCodeReqNo.value || undefined,
+      rememberAccount: rememberMe.value,
+      businessApiBase: businessApiBase.value.trim(),
+    });
+  } catch (e) {
+    const msg = e instanceof ApiError ? e.message : '登录失败';
+    authError.value = msg;
+  } finally {
+    authLoading.value = false;
+  }
+};
+
+// 接收父组件透传的登录错误
+defineExpose({
+  setError: (msg: string) => {
+    authError.value = msg;
+  },
 });
 </script>
 
@@ -60,7 +228,7 @@ const usernameInitial = computed(() => {
     @click="emit('close')"
   >
     <div
-      class="bg-white/95 backdrop-blur-[20px] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.12)] w-[400px] max-h-[85vh] overflow-hidden flex flex-col"
+      class="bg-white/95 backdrop-blur-[20px] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.12)] w-[440px] max-h-[88vh] overflow-hidden flex flex-col"
       @click.stop
     >
       <div
@@ -101,58 +269,68 @@ const usernameInitial = computed(() => {
             </span>
           </div>
 
-          <!-- 登录/注册 切换 -->
+          <!-- 登录方式 tab：账号 / 手机号 / 邮箱 -->
           <div class="flex bg-black/[0.04] rounded-xl p-0.5 mb-4">
             <button
-              @click="emit('update:authMode', 'login')"
+              v-for="opt in [
+                { v: 'account', label: '账号' },
+                { v: 'phone', label: '手机号' },
+                { v: 'email', label: '邮箱' },
+              ]"
+              :key="opt.v"
+              @click="channel = opt.v as any"
               class="flex-1 py-1.5 text-[13px] font-medium rounded-lg transition"
               :class="
-                authMode === 'login'
+                channel === opt.v
                   ? 'bg-white text-[#0071e3] shadow-sm'
                   : 'text-[#86868b] hover:text-[#1d1d1f]'
               "
             >
-              登录
-            </button>
-            <button
-              @click="emit('update:authMode', 'register')"
-              class="flex-1 py-1.5 text-[13px] font-medium rounded-lg transition"
-              :class="
-                authMode === 'register'
-                  ? 'bg-white text-[#0071e3] shadow-sm'
-                  : 'text-[#86868b] hover:text-[#1d1d1f]'
-              "
-            >
-              注册
+              {{ opt.label }}
             </button>
           </div>
 
-          <form
-            @submit.prevent="emit('submitAuth', authMode)"
-            class="space-y-3 relative"
-          >
+          <form @submit.prevent="onSubmit" class="space-y-3">
+            <!-- 账号 / 手机 / 邮箱 输入框 -->
             <div class="relative">
               <user
+                v-if="channel === 'account'"
+                theme="outline"
+                size="14"
+                :stroke-width="3"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] pointer-events-none"
+              />
+              <phone
+                v-else-if="channel === 'phone'"
+                theme="outline"
+                size="14"
+                :stroke-width="3"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] pointer-events-none"
+              />
+              <message
+                v-else
                 theme="outline"
                 size="14"
                 :stroke-width="3"
                 class="absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] pointer-events-none"
               />
               <input
-                :value="authUsername"
-                @input="
-                  emit(
-                    'update:authUsername',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
+                v-model="account"
                 type="text"
-                placeholder="用户名（3-20 位）"
-                autocomplete="username"
-                class="w-[350px] bg-black/[0.04] border-none rounded-xl pl-9 pr-3 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
+                :placeholder="
+                  channel === 'phone'
+                    ? '请输入手机号'
+                    : channel === 'email'
+                      ? '请输入邮箱'
+                      : '请输入账号'
+                "
+                :autocomplete="channel === 'account' ? 'username' : 'off'"
+                class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-3 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
               />
             </div>
-            <div class="relative">
+
+            <!-- 密码（仅账号登录） -->
+            <div v-if="channel === 'account'" class="relative">
               <lock
                 theme="outline"
                 size="14"
@@ -160,18 +338,10 @@ const usernameInitial = computed(() => {
                 class="absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] pointer-events-none"
               />
               <input
-                :value="authPassword"
-                @input="
-                  emit(
-                    'update:authPassword',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
+                v-model="password"
                 :type="showPassword ? 'text' : 'password'"
                 placeholder="密码（至少 6 位）"
-                :autocomplete="
-                  authMode === 'login' ? 'current-password' : 'new-password'
-                "
+                autocomplete="current-password"
                 class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-10 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
               />
               <button
@@ -193,13 +363,79 @@ const usernameInitial = computed(() => {
                 />
               </button>
             </div>
-            <div v-if="authError" class="text-[12px] text-[#ff3b30] pl-1">
+
+            <!-- 验证码：账号登录 = 图形验证码；手机/邮箱 = 短信/邮箱验证码 -->
+            <div v-if="channel === 'account' && captchaOpen" class="flex gap-2">
+              <input
+                v-model="validCode"
+                type="text"
+                placeholder="图形验证码"
+                class="flex-1 bg-black/[0.04] border-none rounded-xl px-3 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
+              />
+              <div
+                class="w-[100px] h-[42px] rounded-xl bg-black/[0.04] flex items-center justify-center overflow-hidden cursor-pointer"
+                @click="loadPicCaptcha"
+                :title="captchaImage ? '点击换一张' : '点击获取验证码'"
+              >
+                <img
+                  v-if="captchaImage"
+                  :src="captchaImage"
+                  alt="验证码"
+                  class="w-full h-full object-contain"
+                />
+                <refresh
+                  v-else
+                  theme="outline"
+                  size="16"
+                  :stroke-width="3"
+                  class="text-[#86868b]"
+                />
+              </div>
+            </div>
+
+            <div v-if="channel === 'phone' || channel === 'email'" class="flex gap-2">
+              <input
+                v-model="validCode"
+                type="text"
+                :placeholder="channel === 'phone' ? '短信验证码' : '邮箱验证码'"
+                class="flex-1 bg-black/[0.04] border-none rounded-xl px-3 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
+              />
+              <button
+                type="button"
+                @click="sendValidCode"
+                :disabled="sendCooldown > 0"
+                class="shrink-0 px-3 h-[42px] rounded-xl text-[13px] font-medium transition"
+                :class="
+                  sendCooldown > 0
+                    ? 'bg-black/[0.04] text-[#86868b] cursor-not-allowed'
+                    : 'bg-[#0071e3]/10 text-[#0071e3] hover:bg-[#0071e3]/15'
+                "
+              >
+                {{ sendCooldown > 0 ? `${sendCooldown}s` : '获取验证码' }}
+              </button>
+            </div>
+
+            <!-- 记住账号 -->
+            <label class="flex items-center gap-2 cursor-pointer pl-1">
+              <input
+                v-model="rememberMe"
+                type="checkbox"
+                class="w-[14px] h-[14px] accent-[#0071e3]"
+              />
+              <span class="text-[12px] text-[#86868b]">记住账号</span>
+            </label>
+
+            <div
+              v-if="authError"
+              class="text-[12px] text-[#ff3b30] pl-1"
+            >
               {{ authError }}
             </div>
+
             <button
               type="submit"
-              :disabled="authLoading"
-              class="w-full bg-[#0071e3] text-white rounded-xl py-2.5 text-[14px] font-medium hover:bg-[#0077ed] disabled:opacity-65 transition flex items-center justify-center gap-1.5"
+              :disabled="!canSubmit"
+              class="w-full bg-[#0071e3] text-white rounded-xl py-2.5 text-[14px] font-medium hover:bg-[#0077ed] disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-1.5"
             >
               <check
                 v-if="!authLoading"
@@ -207,17 +443,10 @@ const usernameInitial = computed(() => {
                 size="14"
                 :stroke-width="4"
               />
-              <span>
-                {{
-                  authLoading
-                    ? '处理中...'
-                    : authMode === 'login'
-                      ? '登录'
-                      : '注册并登录'
-                }}
-              </span>
+              <span>{{ authLoading ? '处理中...' : '登录' }}</span>
             </button>
           </form>
+
           <p class="text-[12px] text-[#86868b] mt-3 text-center">
             登录后，本地便签将自动同步到云端
           </p>
@@ -233,6 +462,11 @@ const usernameInitial = computed(() => {
               class="text-[#0071e3]"
             />
             <span class="text-[13px] font-medium text-[#1d1d1f]">当前账户</span>
+            <span
+              v-if="!cloudMode"
+              class="text-[11px] text-[#ff9500] bg-[#ff9500]/10 px-2 py-0.5 rounded-full ml-1"
+              >未配置业务接口</span
+            >
           </div>
           <div
             class="flex items-center gap-3 p-3 bg-black/[0.03] rounded-xl mb-3"
@@ -246,9 +480,14 @@ const usernameInitial = computed(() => {
               <div class="text-[14px] font-medium text-[#1d1d1f] truncate">
                 {{ currentUser?.username }}
               </div>
-              <div class="text-[12px] text-[#34c759] flex items-center gap-1">
-                <check theme="outline" size="10" :stroke-width="4" />
-                已登录 · 云端同步中
+              <div
+                class="text-[12px] flex items-center gap-1"
+                :class="cloudMode ? 'text-[#34c759]' : 'text-[#86868b]'"
+              >
+                <check v-if="cloudMode" theme="outline" size="10" :stroke-width="4" />
+                <span>{{
+                  cloudMode ? '已登录 · 云端同步中' : '已登录 · 本地模式'
+                }}</span>
               </div>
             </div>
           </div>
@@ -261,6 +500,28 @@ const usernameInitial = computed(() => {
           </button>
           <p class="text-[12px] text-[#86868b] mt-2 text-center">
             退出后将以本地模式继续使用，数据保留在本设备
+          </p>
+        </div>
+
+        <!-- 分割线 -->
+        <div class="border-t border-black/[0.06]"></div>
+
+        <!-- 业务接口地址配置 -->
+        <div>
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-[13px] font-medium text-[#1d1d1f]">业务接口地址</span>
+            <span class="text-[12px] text-[#86868b]">便签/AI/上传</span>
+          </div>
+          <input
+            v-model="businessApiBase"
+            @blur="onBusinessBaseBlur"
+            type="text"
+            placeholder="例如：https://your-api.example.com"
+            class="w-full bg-black/[0.04] border-none rounded-xl px-3 py-2.5 text-[13px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition font-mono"
+          />
+          <p class="text-[11px] text-[#86868b] mt-1.5 leading-relaxed">
+            留空时，登录用户也以本地模式运行；填写后便签/AI/图片上传将调用该地址的
+            <code class="bg-black/[0.04] px-1 rounded">/api/notes</code> 等接口。
           </p>
         </div>
 

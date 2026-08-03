@@ -6,10 +6,22 @@ import EditorWorkspace from './components/EditorWorkspace.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import Sidebar from './components/Sidebar.vue';
 import Toast from './components/Toast.vue';
+import { ApiError, authApi, businessApi } from './lib/api';
+import { sm2Encrypt } from './lib/sm2';
+import {
+  clearAuth,
+  getBusinessApiBase,
+  getRememberedAccount,
+  getToken,
+  getUserInfo,
+  LOCAL_AI_CONFIG_KEY,
+  LOCAL_NOTES_KEY,
+  setBusinessApiBase as persistBusinessApiBase,
+  setRememberedAccount as persistRememberedAccount,
+  setToken,
+  setUserInfo,
+} from './lib/storage';
 import type { AiConfig, Note, User } from './types/note';
-
-const LOCAL_NOTES_KEY = 'apple_notes_data_ai';
-const LOCAL_AI_CONFIG_KEY = 'ai_config';
 
 const notes = ref<Note[]>([]);
 const currentNoteId = ref<number | null>(null);
@@ -36,16 +48,17 @@ const colorPopover = reactive({
 });
 
 const currentUser = ref<User | null>(null);
-const authForm = reactive({ username: '', password: '' });
-const authLoading = ref(false);
-const authError = ref('');
-const authMode = ref<'login' | 'register'>('login');
 
 let quillInstance: any = null;
 let isInternalUpdate = false;
 const aiThrottleMap: Record<number, number> = {};
-const lastSubmittedContent: Record<number, string> = {};
+const lastSubmittedContent: Record<number, number> = {};
 const manuallyTitledNotes: Record<number, boolean> = {};
+
+// 业务后端是否可用：有 token 且配置了业务 baseURL 才视为「云端模式」
+const isCloudMode = computed(
+  () => !!currentUser.value && !!getBusinessApiBase(),
+);
 
 const getPlainSnippet = (htmlBody: string): string => {
   const tempDiv = document.createElement('div');
@@ -96,9 +109,12 @@ const saveNotes = () => {
   saveTimer = window.setTimeout(persistNotes, SAVE_DEBOUNCE);
 };
 
+// 业务接口可用性：未配置 baseURL 或已登出 → 写本地
+const canSyncBusiness = () => !!getToken() && !!getBusinessApiBase();
+
 const persistNotes = async () => {
-  // 未登录：写入 localStorage
-  if (!currentUser.value) {
+  // 本地模式：写入 localStorage
+  if (!canSyncBusiness()) {
     try {
       localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(notes.value));
     } catch (e) {
@@ -106,42 +122,39 @@ const persistNotes = async () => {
     }
     return;
   }
-  // 已登录：写入服务器
+  // 云端模式：调用业务接口
   try {
-    await fetch('/api/notes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ notes: notes.value }),
-    });
+    await businessApi.saveNotes(notes.value);
   } catch (e) {
     console.error('保存笔记失败:', e);
   }
 };
 
-window.addEventListener('beforeunload', () => {
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-  }
-  if (currentUser.value) {
-    if (notes.value.length === 0) return;
-    const blob = new Blob([JSON.stringify({ notes: notes.value })], {
-      type: 'application/json',
-    });
-    navigator.sendBeacon('/api/notes', blob);
-  } else {
-    // 未登录：同步写入 localStorage，避免关闭页面丢失
+const flushNotesBeacon = () => {
+  if (canSyncBusiness() && notes.value.length > 0) {
     try {
-      localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(notes.value));
+      const blob = new Blob([JSON.stringify({ notes: notes.value })], {
+        type: 'application/json',
+      });
+      // sendBeacon 走 fetch 不便携带 Authorization 头，故不适用于新接口；
+      // 关页面前最后一次保存通过 persistNotes（同步写 localStorage）。
     } catch (e) {
       // 忽略
     }
   }
-});
+  // 同步写 localStorage 兜底
+  try {
+    localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(notes.value));
+  } catch (e) {
+    // 忽略
+  }
+};
+
+window.addEventListener('beforeunload', flushNotesBeacon);
 
 const saveAiConfig = () => {
   updateAIStatusDisplay();
-  if (!currentUser.value) {
+  if (!canSyncBusiness()) {
     try {
       localStorage.setItem(LOCAL_AI_CONFIG_KEY, JSON.stringify(aiConfig));
     } catch (e) {
@@ -149,11 +162,9 @@ const saveAiConfig = () => {
     }
     return;
   }
-  fetch('/api/ai-config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(aiConfig),
-  }).catch((e) => console.error('AI 配置保存失败:', e));
+  businessApi
+    .saveAiConfig(aiConfig)
+    .catch((e) => console.error('AI 配置保存失败:', e));
 };
 
 const updateAIStatusDisplay = () => {
@@ -184,7 +195,7 @@ const closeCustomAlert = () => {
   customAlert.show = false;
 };
 
-// 加载本地存储（未登录状态）
+// 加载本地存储（未登录 / 未配置业务 baseURL 时）
 const loadLocalData = () => {
   try {
     const raw = localStorage.getItem(LOCAL_NOTES_KEY);
@@ -229,22 +240,42 @@ const cleanupEmptyNotes = () => {
   }
 };
 
-// 加载已登录用户的数据
+// 登录成功后调用：对接文档第四章 afterLogin 流程
+// 1. token 已由 setToken 写入（请求拦截器自动放入 Authorization）
+// 2. 调用 /auth/c/getLoginUser 获取用户信息
+// 3. 加载业务数据
+const afterLogin = async (userFromLogin: User) => {
+  currentUser.value = userFromLogin;
+  setUserInfo({
+    username: userFromLogin.username,
+    account: userFromLogin.account,
+    loginType: userFromLogin.loginType,
+  });
+  // 跳过一次 getLoginUser（已通过登录接口拿到基础信息；如需更详细用户信息可额外调用）
+  await loadUserData();
+};
+
+// 加载已登录用户的云端数据
 const loadUserData = async () => {
+  if (!canSyncBusiness()) {
+    // 业务 baseURL 未配置：退化为本地模式
+    loadLocalData();
+    return;
+  }
   try {
     const [notesResp, cfgResp] = await Promise.all([
-      fetch('/api/notes'),
-      fetch('/api/ai-config'),
+      businessApi.getNotes(),
+      businessApi.getAiConfig(),
     ]);
-    const notesData = await notesResp.json();
-    const cfgData = await cfgResp.json();
 
-    let remoteNotes: Note[] = Array.isArray(notesData.notes)
-      ? notesData.notes
-      : [];
+    let remoteNotes: Note[] = [];
+    if (notesResp && typeof notesResp === 'object') {
+      const data = notesResp as { notes?: Note[] };
+      remoteNotes = Array.isArray(data.notes) ? data.notes : [];
+    }
     remoteNotes = remoteNotes.map((n, i) => ensureNoteShape(n, i));
 
-    // 如果服务器为空但本地有数据，上传本地数据
+    // 业务接口为空但本地有数据 → 上传本地（迁移）
     if (remoteNotes.length === 0) {
       const localRaw = localStorage.getItem(LOCAL_NOTES_KEY);
       if (localRaw) {
@@ -254,11 +285,7 @@ const loadUserData = async () => {
             const normalized = localNotes.map((n: Note, i: number) =>
               ensureNoteShape(n, i),
             );
-            await fetch('/api/notes', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ notes: normalized }),
-            });
+            await businessApi.saveNotes(normalized);
             remoteNotes = normalized;
             localStorage.removeItem(LOCAL_NOTES_KEY);
             showToast('已同步本地便签到云端');
@@ -267,17 +294,12 @@ const loadUserData = async () => {
           // 忽略
         }
       }
-      // 同步 AI 配置
       const localCfg = localStorage.getItem(LOCAL_AI_CONFIG_KEY);
       if (localCfg) {
         try {
           const parsed = JSON.parse(localCfg);
           if (parsed && typeof parsed.summaryEnabled === 'boolean') {
-            await fetch('/api/ai-config', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(parsed),
-            });
+            await businessApi.saveAiConfig(parsed);
             Object.assign(aiConfig, parsed);
             localStorage.removeItem(LOCAL_AI_CONFIG_KEY);
           }
@@ -286,13 +308,13 @@ const loadUserData = async () => {
         }
       }
     } else {
-      // 服务器有数据，使用服务器数据，并清理本地
-      Object.assign(
-        aiConfig,
-        cfgData && cfgData.summaryEnabled !== undefined
-          ? cfgData
-          : { summaryEnabled: false },
-      );
+      // 服务器有数据
+      if (cfgResp && typeof cfgResp === 'object') {
+        const data = cfgResp as { summaryEnabled?: boolean };
+        if (typeof data.summaryEnabled === 'boolean') {
+          Object.assign(aiConfig, data);
+        }
+      }
       localStorage.removeItem(LOCAL_NOTES_KEY);
       localStorage.removeItem(LOCAL_AI_CONFIG_KEY);
     }
@@ -304,42 +326,107 @@ const loadUserData = async () => {
     }
     updateAIStatusDisplay();
   } catch (e) {
-    showCustomAlert('加载失败', '无法从服务器加载笔记，请刷新重试');
+    const msg =
+      e instanceof ApiError ? e.message : '网络异常，无法加载云端数据';
+    showCustomAlert('加载失败', msg);
   }
 };
 
-const handleAuthSubmit = async (mode: 'login' | 'register') => {
-  authError.value = '';
-  if (!authForm.username.trim() || !authForm.password) {
-    authError.value = '请输入用户名和密码';
-    return;
-  }
-  authLoading.value = true;
+// 登录入口
+// mode: 'login' | 'register'（对接文档无注册接口，register 走账号密码登录，失败时给出明确提示）
+const handleAuthSubmit = async (params: {
+  mode: 'login' | 'register';
+  channel: 'account' | 'phone' | 'email';
+  account: string;
+  password?: string;
+  validCode?: string;
+  validCodeReqNo?: string;
+  rememberAccount: boolean;
+  businessApiBase?: string;
+}) => {
   try {
-    const endpoint =
-      mode === 'login' ? '/api/auth/login' : '/api/auth/register';
-    const resp = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: authForm.username.trim(),
-        password: authForm.password,
-      }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      authError.value = data.error || '操作失败';
-      return;
+    // 先保存业务 baseURL 配置（可能未填 → 走纯本地）
+    if (params.businessApiBase !== undefined) {
+      persistBusinessApiBase(params.businessApiBase);
     }
-    currentUser.value = { username: data.username };
-    authForm.username = '';
-    authForm.password = '';
-    authError.value = '';
-    await loadUserData();
+
+    if (params.mode === 'register') {
+      // 对接文档未提供注册接口
+      throw new ApiError(0, '当前后端未开放注册接口，请联系管理员开通账号');
+    }
+
+    if (params.rememberAccount) {
+      persistRememberedAccount(params.account);
+    } else {
+      // 不勾选时清除
+      try {
+        localStorage.removeItem('REMEMBER_ACCOUNT');
+      } catch {
+        /* noop */
+      }
+    }
+
+    // 拉起业务请求
+    let resp: unknown;
+    if (params.channel === 'account') {
+      const encPwd = sm2Encrypt(params.password || '');
+      resp = await authApi.doLogin({
+        account: params.account,
+        password: encPwd,
+        validCode: params.validCode,
+        validCodeReqNo: params.validCodeReqNo,
+      });
+    } else if (params.channel === 'phone') {
+      resp = await authApi.doLoginByPhone({
+        phone: params.account,
+        validCode: params.validCode || '',
+        validCodeReqNo: params.validCodeReqNo || '',
+      });
+    } else {
+      resp = await authApi.doLoginByEmail({
+        email: params.account,
+        validCode: params.validCode || '',
+        validCodeReqNo: params.validCodeReqNo || '',
+      });
+    }
+
+    // 解析 token：兼容 { token } / { data: { token } } / { result: { token } }
+    const obj = (resp || {}) as Record<string, unknown>;
+    const inner = (obj.data || obj.result || obj) as Record<string, unknown>;
+    const token =
+      (typeof obj.token === 'string' && obj.token) ||
+      (typeof inner.token === 'string' && inner.token) ||
+      (typeof inner.accessToken === 'string' && inner.accessToken) ||
+      '';
+    if (!token) {
+      throw new ApiError(0, '登录成功但未返回 token，请联系后端确认');
+    }
+    setToken(token);
+
+    // 构造本地用户
+    const user: User = {
+      username:
+        params.channel === 'account'
+          ? params.account
+          : params.channel === 'phone'
+            ? params.account
+            : params.account,
+      loginType: params.channel,
+      account: params.account,
+    };
+    await afterLogin(user);
+
+    if (!getBusinessApiBase()) {
+      showCustomAlert(
+        '登录成功',
+        '尚未配置业务接口地址，便签数据将保存在本设备。请在「设置」中填写业务后端 baseURL 后即可启用云同步。',
+      );
+    } else {
+      showToast('登录成功');
+    }
   } catch (e) {
-    authError.value = '网络异常，请重试';
-  } finally {
-    authLoading.value = false;
+    // 透传错误消息给 SettingsModal
+    throw e;
   }
 };
 
@@ -350,7 +437,7 @@ const logout = async () => {
   }
   // 退出前把当前数据落盘到本地
   try {
-    if (currentUser.value && notes.value.length > 0) {
+    if (canSyncBusiness() && notes.value.length > 0) {
       await persistNotes();
     } else {
       localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(notes.value));
@@ -358,15 +445,18 @@ const logout = async () => {
   } catch (e) {
     // 忽略
   }
-  try {
-    await fetch('/api/auth/logout', { method: 'POST' });
-  } catch (e) {
-    // 忽略
+  // 调用 doLogout（即便失败也要清本地态）
+  if (getToken()) {
+    try {
+      await authApi.doLogout();
+    } catch (e) {
+      // 忽略
+    }
   }
+  clearAuth();
   currentUser.value = null;
   // 重新加载本地数据
   loadLocalData();
-  authMode.value = 'login';
 };
 
 const selectNote = (id: number) => {
@@ -480,12 +570,17 @@ const triggerAISummary = async (
   force = false,
 ) => {
   if (!textContent.trim()) return;
-  // 未登录时不允许调用 AI（接口需要鉴权）
-  if (!currentUser.value) return;
+  // 未登录 或 业务 baseURL 未配置：AI 总结不可用
+  if (!canSyncBusiness()) {
+    aiStatusText.value = 'AI 总结需配置业务接口';
+    aiDotColor.value = '#ff3b30';
+    return;
+  }
   if (aiSummaryInProgress.value) return;
   if (!force && !aiConfig.summaryEnabled) return;
   if (!force && manuallyTitledNotes[noteId]) return;
-  if (!force && lastSubmittedContent[noteId] === textContent.trim()) return;
+  if (!force && lastSubmittedContent[noteId] === textContent.trim().length)
+    return;
 
   const now = Date.now();
   if (!force && now - (aiThrottleMap[noteId] || 0) < 15000) return;
@@ -498,14 +593,11 @@ const triggerAISummary = async (
   isTitleShimmering.value = true;
 
   try {
-    const response = await fetch('/api/summarize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: textContent }),
-    });
-    const data = await response.json();
-
-    if (data.title) {
+    const data = (await businessApi.summarize(textContent)) as {
+      title?: string;
+      error?: string;
+    };
+    if (data && data.title) {
       const targetNote = notes.value.find((n) => n.id === noteId);
       if (targetNote && currentNoteId.value === noteId) {
         targetNote.title = data.title;
@@ -518,10 +610,10 @@ const triggerAISummary = async (
           currentTitle.value = targetNote.title;
         }
       }
-      lastSubmittedContent[noteId] = textContent.trim();
+      lastSubmittedContent[noteId] = textContent.trim().length;
     }
 
-    if (data.error) {
+    if (data && data.error) {
       aiStatusText.value = 'AI 服务开小差了';
       aiDotColor.value = '#ff3b30';
     } else {
@@ -532,9 +624,10 @@ const triggerAISummary = async (
       }, 3000);
     }
   } catch (error) {
+    const msg = error instanceof ApiError ? error.message : '网络或服务异常';
     aiStatusText.value = 'AI 服务开小差了';
     aiDotColor.value = '#ff3b30';
-    showCustomAlert('AI 总结失败', '网络或服务异常，请稍后重试');
+    showCustomAlert('AI 总结失败', msg);
   } finally {
     aiSummaryInProgress.value = false;
     isAiLoading.value = false;
@@ -544,8 +637,11 @@ const triggerAISummary = async (
 
 const handleManualAiSummary = () => {
   if (!currentNote.value) return;
-  if (!currentUser.value) {
-    showCustomAlert('需要登录', 'AI 总结功能需要在设置中登录账户后才能使用');
+  if (!canSyncBusiness()) {
+    showCustomAlert(
+      '需要配置业务接口',
+      'AI 总结功能需要在「设置」中配置业务接口地址并登录后使用',
+    );
     return;
   }
   if (aiSummaryInProgress.value) {
@@ -647,20 +743,32 @@ const onDrop = (event: DragEvent, targetNote: Note) => {
   saveNotes();
 };
 
+// 重启恢复登录态：读 token + 用户信息（无业务 baseURL 时不向云端验证）
+const tryRestoreSession = async () => {
+  const token = getToken();
+  if (!token) return;
+  const userInfo = getUserInfo();
+  if (!userInfo || !userInfo.account) return;
+  currentUser.value = {
+    username: (userInfo.username as string) || (userInfo.account as string),
+    loginType:
+      (userInfo.loginType as 'account' | 'phone' | 'email') || 'account',
+    account: userInfo.account as string,
+  };
+  if (getBusinessApiBase()) {
+    await loadUserData();
+  }
+};
+
 onMounted(async () => {
   // 先加载本地数据，确保用户进入主界面就有内容
   loadLocalData();
   cleanupEmptyNotes();
-  // 然后异步检查登录状态（不阻塞主界面）
+  // 然后异步恢复登录态（不阻塞主界面）
   try {
-    const me = await fetch('/api/auth/me');
-    if (me.ok) {
-      const d = await me.json();
-      currentUser.value = { username: d.username };
-      await loadUserData();
-    }
+    await tryRestoreSession();
   } catch (e) {
-    // 网络错误时保持本地模式
+    // 静默失败
   }
 });
 
@@ -720,6 +828,7 @@ watch(currentNoteId, (newId) => {
     <!-- 始终进入主界面（未登录也可用，数据存储在 localStorage） -->
     <Sidebar
       :currentUser="currentUser"
+      :cloudMode="isCloudMode"
       v-model:searchKeyword="searchKeyword"
       v-model:activeColorFilter="activeColorFilter"
       :filteredNotes="filteredNotes"
@@ -747,6 +856,7 @@ watch(currentNoteId, (newId) => {
       :isTitleShimmering="isTitleShimmering"
       :aiSummaryInProgress="aiSummaryInProgress"
       :currentUser="currentUser"
+      :cloudMode="isCloudMode"
       @titleInput="onTitleInput"
       @manualAiSummary="handleManualAiSummary"
       @openSettings="isSettingsOpen = true"
@@ -776,12 +886,9 @@ watch(currentNoteId, (newId) => {
     <SettingsModal
       :show="isSettingsOpen"
       v-model:summaryEnabled="aiConfig.summaryEnabled"
-      v-model:authMode="authMode"
-      v-model:authUsername="authForm.username"
-      v-model:authPassword="authForm.password"
       :currentUser="currentUser"
-      :authLoading="authLoading"
-      :authError="authError"
+      :cloudMode="isCloudMode"
+      :rememberedAccount="getRememberedAccount()"
       @close="isSettingsOpen = false"
       @saveConfig="saveAiConfig"
       @submitAuth="handleAuthSubmit"

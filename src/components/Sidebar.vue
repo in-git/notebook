@@ -13,6 +13,7 @@ import { NOTE_COLORS } from '../types/note';
 
 const props = defineProps<{
   currentUser: UserType | null;
+  cloudMode: boolean;
   searchKeyword: string;
   activeColorFilter: string | null;
   filteredNotes: Note[];
@@ -36,6 +37,7 @@ const emit = defineEmits([
 ]);
 
 const isLoggedIn = computed(() => !!props.currentUser);
+const isCloud = computed(() => props.cloudMode);
 
 const colorFilters = computed(() => [
   { name: '全部', filter: null, hex: null },
@@ -83,6 +85,13 @@ const getPlainSnippet = (htmlBody: string) => {
         </template>
       </div>
       <div class="flex items-center gap-1">
+        <button
+          v-if="isLoggedIn && !isCloud"
+          title="未配置业务接口"
+          class="text-[#ff9500] w-7 h-7 rounded-full flex items-center justify-center bg-[#ff9500]/10 text-[10px] font-medium"
+        >
+          !
+        </button>
         <button
           @click="emit('openSettings')"
           title="设置"

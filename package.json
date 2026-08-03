@@ -3,30 +3,23 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -k -n server,vite -c blue,green \"node server.js\" \"vite\"",
-    "server": "node server.js",
+    "dev": "vite",
     "dev:front": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "type-check": "vue-tsc --noEmit",
-    "start": "node server.js"
+    "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
     "@icon-park/vue-next": "^1.4.2",
-    "cookie-parser": "^1.4.7",
-    "cors": "^2.8.5",
-    "express": "^4.21.0",
-    "ioredis": "^6.0.0",
-    "multer": "^1.4.5-lts.1",
     "quill": "^2.0.3",
     "quill-image-resize-module": "^3.0.0",
+    "sm-crypto": "^0.3.13",
     "vue": "^3.5.13"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "autoprefixer": "^10.4.20",
-    "concurrently": "^9.1.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
 import {
   Copy,
   Delete,
@@ -8,6 +8,8 @@ import {
 } from '@icon-park/vue-next';
 import Quill from 'quill';
 import ImageResize from 'quill-image-resize-module';
+import { ApiError, businessApi } from '../lib/api';
+import { getBusinessApiBase } from '../lib/storage';
 import type { Note, User as UserType } from '../types/note';
 
 // 注册图片缩放模块（UMD 形式，npm 引入需手动注册到 Quill 实例）
@@ -23,6 +25,7 @@ const props = defineProps<{
   isTitleShimmering: boolean;
   aiSummaryInProgress: boolean;
   currentUser: UserType | null;
+  cloudMode: boolean;
 }>();
 
 const emit = defineEmits([
@@ -34,6 +37,9 @@ const emit = defineEmits([
   'deleteNote',
   'quillReady',
 ]);
+
+// 上传错误提示
+const uploadError = ref('');
 
 // 图片转换为 webp 并上传
 const loadImageEl = (file: File): Promise<HTMLImageElement> => {
@@ -104,21 +110,24 @@ onMounted(async () => {
   });
 
   const uploadImageToServer = async (file: File) => {
+    if (!getBusinessApiBase()) {
+      uploadError.value = '请先在「设置」中配置业务接口地址再上传图片';
+      return;
+    }
     const uploadFile = await convertToWebp(file);
     const formData = new FormData();
     formData.append('image', uploadFile);
     try {
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await response.json();
-      if (data.url) {
+      const data = (await businessApi.upload(uploadFile)) as { url?: string };
+      if (data && data.url) {
         const range = quill.getSelection(true);
         quill.insertEmbed(range.index, 'image', data.url);
         quill.setSelection(range.index + 1);
       }
-    } catch (error) {}
+    } catch (error) {
+      const msg = error instanceof ApiError ? error.message : '图片上传失败';
+      uploadError.value = msg;
+    }
   };
 
   const toolbarModule = quill.getModule('toolbar') as {

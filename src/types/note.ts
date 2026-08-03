@@ -1,3 +1,4 @@
+// ========== 业务实体 ==========
 export interface Note {
   id: number;
   title: string;
@@ -7,10 +8,6 @@ export interface Note {
   pinned: boolean;
   color: string | null;
   order: number;
-}
-
-export interface User {
-  username: string;
 }
 
 export interface AiConfig {
@@ -33,3 +30,18 @@ export const NOTE_COLORS: NoteColor[] = [
   { name: '蓝色', value: '#007AFF', hex: '#007AFF' },
   { name: '白色', value: '#FFFFFF', hex: '#FFFFFF' },
 ];
+
+// ========== 用户 / 鉴权 ==========
+// UI 用的最小用户信息（兼容账号/手机/邮箱三种登录）
+export interface User {
+  // 展示名（优先用 username，否则手机号/邮箱）
+  username: string;
+  // 登录方式
+  loginType: 'account' | 'phone' | 'email';
+  // 实际账号（账号/手机号/邮箱）
+  account: string;
+}
+
+// ========== 登录方式 ==========
+export type AuthMode = 'login' | 'register';
+export type LoginChannel = 'account' | 'phone' | 'email';

@@ -1,0 +1,96 @@
+// 统一本地存储管理（对接文档第五章约定）
+// - CLIENT_TOKEN: C端鉴权凭证，区分后台管理端 token
+// - CLIENT_USER_INFO: 登录用户信息
+// - REMEMBER_ACCOUNT: 勾选记住我，仅存放账号字符串
+// - BUSINESS_API_BASE: 业务后端 baseURL（用户可配置；空时降级本地）
+// - LOCAL_NOTES_KEY / LOCAL_AI_CONFIG_KEY: 未登录/未配置业务 baseURL 时的本地数据
+//
+// 所有读写封装在工具函数中，避免散落在各组件里。
+
+const CLIENT_TOKEN = 'CLIENT_TOKEN';
+const CLIENT_USER_INFO = 'CLIENT_USER_INFO';
+const REMEMBER_ACCOUNT = 'REMEMBER_ACCOUNT';
+const BUSINESS_API_BASE = 'BUSINESS_API_BASE';
+const CAPTCHA_OPEN = 'CAPTCHA_OPEN';
+export const LOCAL_NOTES_KEY = 'apple_notes_data_ai';
+export const LOCAL_AI_CONFIG_KEY = 'ai_config';
+
+const safeGet = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const safeSet = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // 忽略（隐私模式等）
+  }
+};
+
+const safeRemove = (key: string): void => {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // 忽略
+  }
+};
+
+// ========== 鉴权凭证 ==========
+export const getToken = (): string | null => safeGet(CLIENT_TOKEN);
+export const setToken = (token: string): void => safeSet(CLIENT_TOKEN, token);
+export const clearToken = (): void => safeRemove(CLIENT_TOKEN);
+
+// ========== 用户信息 ==========
+export interface StoredUser {
+  username?: string;
+  phone?: string;
+  email?: string;
+  [key: string]: unknown;
+}
+
+export const getUserInfo = (): StoredUser | null => {
+  const raw = safeGet(CLIENT_USER_INFO);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as StoredUser;
+  } catch {
+    return null;
+  }
+};
+export const setUserInfo = (user: StoredUser): void =>
+  safeSet(CLIENT_USER_INFO, JSON.stringify(user));
+export const clearUserInfo = (): void => safeRemove(CLIENT_USER_INFO);
+
+// ========== 记住账号 ==========
+export const getRememberedAccount = (): string | null => safeGet(REMEMBER_ACCOUNT);
+export const setRememberedAccount = (account: string): void =>
+  safeSet(REMEMBER_ACCOUNT, account);
+export const clearRememberedAccount = (): void => safeRemove(REMEMBER_ACCOUNT);
+
+// ========== 业务后端 baseURL（用户可配置） ==========
+export const getBusinessApiBase = (): string => {
+  const raw = safeGet(BUSINESS_API_BASE);
+  return (raw || '').trim();
+};
+export const setBusinessApiBase = (base: string): void =>
+  safeSet(BUSINESS_API_BASE, base);
+export const clearBusinessApiBase = (): void => safeRemove(BUSINESS_API_BASE);
+
+// ========== 验证码开关（系统配置接口返回） ==========
+export const getCaptchaOpen = (): boolean => {
+  const raw = safeGet(CAPTCHA_OPEN);
+  return raw === '1' || raw === 'true';
+};
+export const setCaptchaOpen = (open: boolean): void =>
+  safeSet(CAPTCHA_OPEN, open ? '1' : '0');
+
+// ========== 退出登录清理 ==========
+export const clearAuth = (): void => {
+  clearToken();
+  clearUserInfo();
+  // 注意：保留 REMEMBER_ACCOUNT（对接文档第六章约定）
+};
