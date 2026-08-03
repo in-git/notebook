@@ -19,7 +19,7 @@ const getNoteColorHex = (note?: Note) =>
 <template>
   <div
     v-if="show"
-    class="fixed z-[9999] bg-white/80 backdrop-blur-xl border border-white/60 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] p-2 flex items-center gap-1.5"
+    class="fixed z-[9999] bg-white/80 backdrop-blur-xl border gap-4 border-white/60 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] p-2 flex items-center gap-1.5"
     :style="{ top: top + 'px', left: left + 'px' }"
     @click.stop
   >

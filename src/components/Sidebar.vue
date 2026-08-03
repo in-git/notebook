@@ -6,7 +6,6 @@ import {
   Pushpin,
   Search,
   Setting,
-  User,
 } from '@icon-park/vue-next';
 import { computed } from 'vue';
 import type { Note, User as UserType } from '../types/note';
@@ -75,11 +74,11 @@ const getPlainSnippet = (htmlBody: string) => {
           }}</span>
         </template>
         <template v-else>
-          <div
-            class="w-8 h-8 rounded-full bg-black/[0.05] text-[#86868b] flex items-center justify-center shrink-0"
-          >
-            <user theme="outline" size="16" :stroke-width="3" />
-          </div>
+          <img
+            src="/logo.png"
+            alt="Logo"
+            class="w-8 h-8 rounded-lg shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+          />
           <span class="text-[13px] text-[#86868b]">未登录 · 本地模式</span>
         </template>
       </div>
@@ -125,7 +124,7 @@ const getPlainSnippet = (htmlBody: string) => {
         />
       </div>
       <button
-        class="shrink-0 bg-transparent border-none cursor-pointer w-9 h-9 rounded-full flex items-center justify-center text-[#0071e3] transition hover:bg-[#0071e3]/10"
+        class="shrink-0 relative z-2 bg-transparent border-none cursor-pointer w-9 h-9 rounded-full flex items-center justify-center text-[#0071e3] transition hover:bg-[#0071e3]/10"
         @click="emit('createNote')"
         title="新建便签"
       >

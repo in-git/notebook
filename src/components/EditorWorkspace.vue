@@ -6,7 +6,12 @@ import {
   Magic,
   Setting as SettingIcon,
 } from '@icon-park/vue-next';
+import Quill from 'quill';
+import ImageResize from 'quill-image-resize-module';
 import type { Note, User as UserType } from '../types/note';
+
+// 注册图片缩放模块（UMD 形式，npm 引入需手动注册到 Quill 实例）
+Quill.register('modules/imageResize', ImageResize);
 
 const props = defineProps<{
   currentNote?: Note;
@@ -81,10 +86,6 @@ const convertToWebp = async (file: File, quality = 0.85): Promise<File> => {
 };
 
 onMounted(async () => {
-  // @ts-ignore
-  const Quill = window.Quill;
-  if (!Quill) return;
-
   const quill = new Quill('#editor-container', {
     theme: 'snow',
     placeholder: '键入富文本内容，失焦后 AI 将自动总结标题...',
@@ -98,7 +99,6 @@ onMounted(async () => {
         ['image'],
         ['clean'],
       ],
-      // @ts-ignore
       imageResize: {},
     },
   });
@@ -121,7 +121,9 @@ onMounted(async () => {
     } catch (error) {}
   };
 
-  const toolbarModule = quill.getModule('toolbar');
+  const toolbarModule = quill.getModule('toolbar') as {
+    addHandler: (name: string, handler: () => void) => void;
+  };
   toolbarModule.addHandler('image', () => {
     const input = document.createElement('input');
     input.setAttribute('type', 'file');
@@ -235,19 +237,14 @@ onMounted(async () => {
       v-show="!currentNote"
       class="flex-1 h-full flex flex-col items-center justify-center text-[#86868b] gap-3"
     >
-      <div
-        class="w-20 h-20 rounded-2xl bg-gradient-to-br from-[#0071e3]/10 to-[#6366f1]/10 flex items-center justify-center text-[#c7c7cc]"
-      >
-        <setting-icon
-          theme="outline"
-          size="36"
-          :stroke-width="2"
-          class="text-[#86868b]"
-        />
-      </div>
-      <p class="text-[14px]">未选择便签</p>
+      <img
+        src="/logo.png"
+        alt="Logo"
+        class="w-20 h-20 rounded-2xl shadow-[0_4px_16px_rgba(0,0,0,0.06)]"
+      />
+      <p class="text-[14px] mt-1">未选择便签</p>
       <p class="text-[12px] text-[#c7c7cc]">
-        点击右上角 + 或在设置中登录，开启云同步
+        点击右上角 + 新建，或在设置中登录开启云同步
       </p>
     </div>
   </div>

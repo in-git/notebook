@@ -1,19 +1,18 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>吴文龙的便签</title>
-    <!-- Quill 富文本编辑器样式（本地化，避免 CDN 依赖） -->
-    <link rel="stylesheet" href="/vendor/quill.snow.css" />
-  </head>
-  <body
-    class="bg-[linear-gradient(135deg,#f5f7fa_0%,#e4e8f0_100%)] h-screen w-screen flex overflow-hidden text-[#1d1d1f] antialiased"
-  >
-    <div id="app"></div>
-    <!-- Quill + 图片缩放模块：通过 script 提前加载到 window，供 EditorWorkspace 初始化使用 -->
-    <script src="/vendor/quill.min.js"></script>
-    <script src="/vendor/image-resize.min.js"></script>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>吴文龙的便签</title>
+  <!-- App Logo: 作为浏览器标签页图标和侧边栏品牌标识 -->
+  <link rel="icon" type="image/png" href="/logo.png" />
+</head>
+
+<body
+  class="bg-[linear-gradient(135deg,#f5f7fa_0%,#e4e8f0_100%)] h-screen w-screen flex overflow-hidden text-[#1d1d1f] antialiased">
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
 </html>

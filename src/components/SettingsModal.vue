@@ -129,7 +129,7 @@ const usernameInitial = computed(() => {
 
           <form
             @submit.prevent="emit('submitAuth', authMode)"
-            class="space-y-3"
+            class="space-y-3 relative"
           >
             <div class="relative">
               <user
@@ -149,7 +149,7 @@ const usernameInitial = computed(() => {
                 type="text"
                 placeholder="用户名（3-20 位）"
                 autocomplete="username"
-                class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-3 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
+                class="w-[350px] bg-black/[0.04] border-none rounded-xl pl-9 pr-3 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
               />
             </div>
             <div class="relative">
