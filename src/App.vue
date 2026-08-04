@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import ColorPopover from './components/ColorPopover.vue';
 import CustomAlert from './components/CustomAlert.vue';
 import EditorWorkspace from './components/EditorWorkspace.vue';
+import ImageTools from './components/ImageTools.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import Sidebar from './components/Sidebar.vue';
 import Toast from './components/Toast.vue';
@@ -10,13 +11,11 @@ import { ApiError, authApi, businessApi } from './lib/api';
 import { sm2Encrypt } from './lib/sm2';
 import {
   clearAuth,
-  getBusinessApiBase,
   getRememberedAccount,
   getToken,
   getUserInfo,
   LOCAL_AI_CONFIG_KEY,
   LOCAL_NOTES_KEY,
-  setBusinessApiBase as persistBusinessApiBase,
   setRememberedAccount as persistRememberedAccount,
   setToken,
   setUserInfo,
@@ -31,6 +30,8 @@ const activeColorFilter = ref<string | null>(null);
 const currentTitle = ref('');
 const wordCount = ref(0);
 const isSettingsOpen = ref(false);
+const isImageToolsOpen = ref(false);
+const settingsModalRef = ref<InstanceType<typeof SettingsModal> | null>(null);
 const isAiLoading = ref(false);
 const aiStatusText = ref('AI 总结已关闭');
 const aiDotColor = ref('#86868b');
@@ -49,16 +50,14 @@ const colorPopover = reactive({
 
 const currentUser = ref<User | null>(null);
 
-let quillInstance: any = null;
+let aiEditorInstance: any = null;
 let isInternalUpdate = false;
 const aiThrottleMap: Record<number, number> = {};
 const lastSubmittedContent: Record<number, number> = {};
 const manuallyTitledNotes: Record<number, boolean> = {};
 
-// 业务后端是否可用：有 token 且配置了业务 baseURL 才视为「云端模式」
-const isCloudMode = computed(
-  () => !!currentUser.value && !!getBusinessApiBase(),
-);
+// 已登录即视为「云端模式」（业务后端固定为本地 http://localhost:82）
+const isCloudMode = computed(() => !!currentUser.value);
 
 const getPlainSnippet = (htmlBody: string): string => {
   const tempDiv = document.createElement('div');
@@ -109,8 +108,8 @@ const saveNotes = () => {
   saveTimer = window.setTimeout(persistNotes, SAVE_DEBOUNCE);
 };
 
-// 业务接口可用性：未配置 baseURL 或已登出 → 写本地
-const canSyncBusiness = () => !!getToken() && !!getBusinessApiBase();
+// 业务接口可用性：已登录（有 token）即走云端
+const canSyncBusiness = () => !!getToken();
 
 const persistNotes = async () => {
   // 本地模式：写入 localStorage
@@ -242,16 +241,37 @@ const cleanupEmptyNotes = () => {
 
 // 登录成功后调用：对接文档第四章 afterLogin 流程
 // 1. token 已由 setToken 写入（请求拦截器自动放入 Authorization）
-// 2. 调用 /auth/c/getLoginUser 获取用户信息
+// 2. 调用 /auth/c/getLoginUser 获取用户信息，存入 CLIENT_USER_INFO
 // 3. 加载业务数据
-const afterLogin = async (userFromLogin: User) => {
-  currentUser.value = userFromLogin;
+const afterLogin = async (fallbackUser: User) => {
+  // 优先用 getLoginUser 拉取真实用户信息；失败则回退到登录入参构造的 user
+  let user: User = fallbackUser;
+  try {
+    const resp = await authApi.getLoginUser();
+    const obj = (resp || {}) as Record<string, unknown>;
+    const inner = (obj.data || obj.result || obj) as Record<string, unknown>;
+    const username =
+      (typeof inner.username === 'string' && inner.username) ||
+      (typeof inner.nickName === 'string' && inner.nickName) ||
+          (typeof inner.nickname === 'string' && inner.nickname) ||
+      (typeof inner.name === 'string' && inner.name) ||
+      fallbackUser.username;
+    const account =
+      (typeof inner.account === 'string' && inner.account) ||
+      fallbackUser.account;
+    // 仅账号登录
+    user = { username, account, loginType: 'account' };
+  } catch (e) {
+    // 拉取用户信息失败不阻断登录流程，使用 fallback
+    console.warn('getLoginUser 失败，使用登录入参作为用户信息', e);
+  }
+
+  currentUser.value = user;
   setUserInfo({
-    username: userFromLogin.username,
-    account: userFromLogin.account,
-    loginType: userFromLogin.loginType,
+    username: user.username,
+    account: user.account,
+    loginType: user.loginType,
   });
-  // 跳过一次 getLoginUser（已通过登录接口拿到基础信息；如需更详细用户信息可额外调用）
   await loadUserData();
 };
 
@@ -332,33 +352,40 @@ const loadUserData = async () => {
   }
 };
 
-// 登录入口
-// mode: 'login' | 'register'（对接文档无注册接口，register 走账号密码登录，失败时给出明确提示）
+// 登录 / 注册入口
+// 注册：调 /auth/c/register，成功后不自动登录，提示并切回登录页（对接文档第五章）
 const handleAuthSubmit = async (params: {
   mode: 'login' | 'register';
-  channel: 'account' | 'phone' | 'email';
   account: string;
-  password?: string;
+  password: string;
   validCode?: string;
   validCodeReqNo?: string;
   rememberAccount: boolean;
-  businessApiBase?: string;
 }) => {
   try {
-    // 先保存业务 baseURL 配置（可能未填 → 走纯本地）
-    if (params.businessApiBase !== undefined) {
-      persistBusinessApiBase(params.businessApiBase);
-    }
+    // 密码前端 SM2 加密（对接文档第四章，禁止明文）
+    const encPwd = sm2Encrypt(params.password);
 
+    // ===== 注册分支：注册成功后不自动登录，切回登录页 =====
     if (params.mode === 'register') {
-      // 对接文档未提供注册接口
-      throw new ApiError(0, '当前后端未开放注册接口，请联系管理员开通账号');
+      await authApi.register({
+        account: params.account,
+        password: encPwd,
+        validCode: params.validCode,
+        validCodeReqNo: params.validCodeReqNo,
+      });
+      // 对接文档第五章：注册成功，引导用户登录
+      showToast('注册成功，请登录');
+      // 切回登录 tab 并回填账号
+      settingsModalRef.value?.switchToLogin();
+      return;
     }
 
+    // ===== 登录分支 =====
+    // 记住账号
     if (params.rememberAccount) {
       persistRememberedAccount(params.account);
     } else {
-      // 不勾选时清除
       try {
         localStorage.removeItem('REMEMBER_ACCOUNT');
       } catch {
@@ -366,29 +393,12 @@ const handleAuthSubmit = async (params: {
       }
     }
 
-    // 拉起业务请求
-    let resp: unknown;
-    if (params.channel === 'account') {
-      const encPwd = sm2Encrypt(params.password || '');
-      resp = await authApi.doLogin({
-        account: params.account,
-        password: encPwd,
-        validCode: params.validCode,
-        validCodeReqNo: params.validCodeReqNo,
-      });
-    } else if (params.channel === 'phone') {
-      resp = await authApi.doLoginByPhone({
-        phone: params.account,
-        validCode: params.validCode || '',
-        validCodeReqNo: params.validCodeReqNo || '',
-      });
-    } else {
-      resp = await authApi.doLoginByEmail({
-        email: params.account,
-        validCode: params.validCode || '',
-        validCodeReqNo: params.validCodeReqNo || '',
-      });
-    }
+    const resp = await authApi.doLogin({
+      account: params.account,
+      password: encPwd,
+      validCode: params.validCode,
+      validCodeReqNo: params.validCodeReqNo,
+    });
 
     // 解析 token：兼容 { token } / { data: { token } } / { result: { token } }
     const obj = (resp || {}) as Record<string, unknown>;
@@ -405,28 +415,19 @@ const handleAuthSubmit = async (params: {
 
     // 构造本地用户
     const user: User = {
-      username:
-        params.channel === 'account'
-          ? params.account
-          : params.channel === 'phone'
-            ? params.account
-            : params.account,
-      loginType: params.channel,
+      username: params.account,
+      loginType: 'account',
       account: params.account,
     };
     await afterLogin(user);
 
-    if (!getBusinessApiBase()) {
-      showCustomAlert(
-        '登录成功',
-        '尚未配置业务接口地址，便签数据将保存在本设备。请在「设置」中填写业务后端 baseURL 后即可启用云同步。',
-      );
-    } else {
-      showToast('登录成功');
-    }
+    showToast('登录成功');
   } catch (e) {
-    // 透传错误消息给 SettingsModal
-    throw e;
+    const msg = e instanceof ApiError ? e.message : (params.mode === 'register' ? '注册失败，请重试' : '登录失败，请重试');
+    // 回传错误到 SettingsModal 展示
+    settingsModalRef.value?.setError(msg);
+    // 文档第一章：登录失败且验证码开启 → 主动刷新图形验证码
+    settingsModalRef.value?.refreshCaptchaIfOpen();
   }
 };
 
@@ -743,7 +744,7 @@ const onDrop = (event: DragEvent, targetNote: Note) => {
   saveNotes();
 };
 
-// 重启恢复登录态：读 token + 用户信息（无业务 baseURL 时不向云端验证）
+// 重启恢复登录态：读 token + 用户信息，已登录即加载云端数据
 const tryRestoreSession = async () => {
   const token = getToken();
   if (!token) return;
@@ -751,13 +752,10 @@ const tryRestoreSession = async () => {
   if (!userInfo || !userInfo.account) return;
   currentUser.value = {
     username: (userInfo.username as string) || (userInfo.account as string),
-    loginType:
-      (userInfo.loginType as 'account' | 'phone' | 'email') || 'account',
+    loginType: 'account',
     account: userInfo.account as string,
   };
-  if (getBusinessApiBase()) {
-    await loadUserData();
-  }
+  await loadUserData();
 };
 
 onMounted(async () => {
@@ -772,50 +770,83 @@ onMounted(async () => {
   }
 });
 
-const handleQuillReady = (quill: any) => {
-  quillInstance = quill;
-  quill.on('text-change', () => {
-    if (isInternalUpdate || !currentNoteId.value) return;
-    const note = notes.value.find((n) => n.id === currentNoteId.value);
-    if (note) {
-      note.body = quill.root.innerHTML;
-      note.updatedAt = Date.now();
-      saveNotes();
-      wordCount.value = quill.getText().trim().length;
-    }
-  });
+let syncInterval: number | null = null;
+let lastSyncedContent = '';
+let lastEditorFocusTime = 0;
 
-  quill.root.addEventListener('focusout', (event: FocusEvent) => {
-    const toolbar = document.querySelector('.ql-toolbar');
-    if (toolbar && toolbar.contains(event.relatedTarget as Node)) return;
-    if (isInternalUpdate || !currentNoteId.value) return;
+const handleAiEditorReady = (editor: any) => {
+  aiEditorInstance = editor;
 
-    const note = notes.value.find((n) => n.id === currentNoteId.value);
-    if (note) {
-      note.body = quill.root.innerHTML;
-      note.updatedAt = Date.now();
-      saveNotes();
-      triggerAISummary(currentNoteId.value, getPlainSnippet(note.body));
+  // 注意：AiEditor 实例没有 .on() 方法，事件需通过初始化配置的
+  // onChange/onFocus/onBlur 回调注册。这里改为在下面的轮询中用
+  // editor.isFocused() 做边沿检测来记录焦点时间。
+
+  // 使用定时器同步内容变化和检测失焦（AIEditor 没有类似 Quill 的事件）
+  if (syncInterval) clearInterval(syncInterval);
+  let wasFocused = false;
+  syncInterval = window.setInterval(() => {
+    if (!aiEditorInstance || !currentNoteId.value) return;
+
+    const currentContent = editor.getHtml();
+    const isFocused = document.hasFocus() && editor.isFocused();
+    const now = Date.now();
+
+    // 边沿检测：从未聚焦变为聚焦时记录焦点时间
+    if (isFocused && !wasFocused) {
+      lastEditorFocusTime = now;
     }
-  });
+    wasFocused = isFocused;
+
+    // 检测失焦：超过 1 秒没有焦点且内容有变化
+    if (
+      !isFocused &&
+      lastSyncedContent &&
+      currentContent !== lastSyncedContent &&
+      now - lastEditorFocusTime > 1000
+    ) {
+      // 保存内容
+      const note = notes.value.find((n) => n.id === currentNoteId.value);
+      if (note) {
+        note.body = currentContent;
+        note.updatedAt = Date.now();
+        saveNotes();
+        // 触发 AI 总结
+        triggerAISummary(currentNoteId.value, getPlainSnippet(currentContent));
+      }
+    }
+
+    // 同步内容变化
+    if (!isInternalUpdate && currentContent !== lastSyncedContent) {
+      lastSyncedContent = currentContent;
+      const note = notes.value.find((n) => n.id === currentNoteId.value);
+      if (note) {
+        note.body = currentContent;
+        note.updatedAt = Date.now();
+        saveNotes();
+        wordCount.value = editor.getText().trim().length;
+      }
+    }
+  }, 500);
 
   if (currentNote.value) {
     currentTitle.value = currentNote.value.title;
     isInternalUpdate = true;
-    quill.root.innerHTML = currentNote.value.body || '';
+    lastSyncedContent = currentNote.value.body || '';
+    editor.setContent(lastSyncedContent);
     isInternalUpdate = false;
-    wordCount.value = quill.getText().trim().length;
+    wordCount.value = editor.getText().trim().length;
   }
 };
 
 watch(currentNoteId, (newId) => {
   const note = notes.value.find((n) => n.id === newId);
-  if (note && quillInstance) {
+  if (note && aiEditorInstance) {
     currentTitle.value = note.title;
     isInternalUpdate = true;
-    quillInstance.root.innerHTML = note.body || '';
+    lastSyncedContent = note.body || '';
+    aiEditorInstance.setContent(lastSyncedContent);
     isInternalUpdate = false;
-    wordCount.value = quillInstance.getText().trim().length;
+    wordCount.value = aiEditorInstance.getText().trim().length;
   }
 });
 </script>
@@ -860,9 +891,10 @@ watch(currentNoteId, (newId) => {
       @titleInput="onTitleInput"
       @manualAiSummary="handleManualAiSummary"
       @openSettings="isSettingsOpen = true"
+      @openImageTools="isImageToolsOpen = true"
       @copyNote="copyCurrentNote"
       @deleteNote="deleteCurrentNote"
-      @quillReady="handleQuillReady"
+      @aiEditorReady="handleAiEditorReady"
     />
 
     <ColorPopover
@@ -884,6 +916,7 @@ watch(currentNoteId, (newId) => {
     />
 
     <SettingsModal
+      ref="settingsModalRef"
       :show="isSettingsOpen"
       v-model:summaryEnabled="aiConfig.summaryEnabled"
       :currentUser="currentUser"
@@ -894,5 +927,7 @@ watch(currentNoteId, (newId) => {
       @submitAuth="handleAuthSubmit"
       @logout="logout"
     />
+
+    <ImageTools :show="isImageToolsOpen" @close="isImageToolsOpen = false" />
   </div>
 </template>

@@ -37,7 +37,7 @@ const emit = defineEmits([
 ]);
 
 const isLoggedIn = computed(() => !!props.currentUser);
-const isCloud = computed(() => props.cloudMode);
+// cloudMode prop 保留供未来扩展，当前未在侧栏使用
 
 const colorFilters = computed(() => [
   { name: '全部', filter: null, hex: null },
@@ -67,11 +67,11 @@ const getPlainSnippet = (htmlBody: string) => {
       <div class="flex items-center gap-2 min-w-0 flex-1">
         <template v-if="isLoggedIn">
           <div
-            class="w-8 h-8 rounded-full bg-[#0071e3]/10 text-[#0071e3] flex items-center justify-center text-[13px] font-semibold shrink-0"
+            class="w-8 h-8 rounded-full bg-[#0071e3]/10 text-[#0071e3] flex items-center justify-center text-[14px] font-semibold shrink-0"
           >
             {{ (currentUser?.username || '?').charAt(0).toUpperCase() }}
           </div>
-          <span class="text-[13px] text-[#1d1d1f] truncate">{{
+          <span class="text-[14px] text-[#1d1d1f] truncate">{{
             currentUser?.username
           }}</span>
         </template>
@@ -81,17 +81,10 @@ const getPlainSnippet = (htmlBody: string) => {
             alt="Logo"
             class="w-8 h-8 rounded-lg shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
           />
-          <span class="text-[13px] text-[#86868b]">未登录 · 本地模式</span>
+          <span class="text-[14px] text-[#86868b]">未登录 · 本地模式</span>
         </template>
       </div>
       <div class="flex items-center gap-1">
-        <button
-          v-if="isLoggedIn && !isCloud"
-          title="未配置业务接口"
-          class="text-[#ff9500] w-7 h-7 rounded-full flex items-center justify-center bg-[#ff9500]/10 text-[10px] font-medium"
-        >
-          !
-        </button>
         <button
           @click="emit('openSettings')"
           title="设置"
@@ -129,7 +122,7 @@ const getPlainSnippet = (htmlBody: string) => {
             )
           "
           placeholder="搜索便签"
-          class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-3 py-[7px] text-[13px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
+          class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-3 py-[7px] text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
         />
       </div>
       <button
@@ -142,8 +135,9 @@ const getPlainSnippet = (htmlBody: string) => {
     </div>
 
     <!-- 颜色筛选条 -->
-    <div
-      class="flex justify-between px-12 py-3 items-center gap-2 overflow-x-auto no-scrollbar mt-2"
+   <div class="px-4 py-3 ">
+     <div
+      class="flex justify-between items-center px-2"
     >
       <button
         v-for="f in colorFilters"
@@ -164,11 +158,12 @@ const getPlainSnippet = (htmlBody: string) => {
       ></button>
     </div>
 
+   </div>
     <!-- 列表区 -->
     <div class="flex-1 overflow-y-auto px-4 pb-4">
       <div
         v-if="filteredNotes.length === 0"
-        class="text-center text-[13px] text-[#86868b] py-10"
+        class="text-center text-[14px] text-[#86868b] py-10"
       >
         {{
           searchKeyword || activeColorFilter !== null
@@ -221,7 +216,7 @@ const getPlainSnippet = (htmlBody: string) => {
             <span class="truncate">{{ note.title || '无标题' }}</span>
           </div>
           <div
-            class="text-[13px] text-[#86868b] whitespace-nowrap overflow-hidden text-ellipsis"
+            class="text-[14px] text-[#86868b] whitespace-nowrap overflow-hidden text-ellipsis"
           >
             {{ getPlainSnippet(note.body) || '无内容' }}
           </div>

@@ -26,7 +26,7 @@ const emit = defineEmits(['close']);
         </div>
       </div>
       <div class="px-6 pb-2 text-center">
-        <div class="text-[13px] text-[#86868b] leading-relaxed">
+        <div class="text-[14px] text-[#86868b] leading-relaxed">
           {{ message }}
         </div>
       </div>

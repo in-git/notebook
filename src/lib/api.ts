@@ -1,22 +1,20 @@
 // API 客户端封装
-// 登录类接口（/auth/c/*）走新后端：https://aab2b9dab7609fdb2.sh7.agentos-app.net/api
-// 业务类接口（笔记/AI配置/AI总结/图片上传）走用户配置的业务后端 baseURL
-// 业务 baseURL 为空时，调用方应避免触发业务请求（前端降级本地模式）
+// 登录类接口前缀 /auth/c/（对接文档第八章）
+// 业务接口前缀 /api/（笔记 / AI 配置 / AI 总结 / 图片上传）
+// baseURL 根据环境自动切换：
+//   - 开发（vite dev）：http://localhost:82
+//   - 生产（vite build）：https://aab2b9dab7609fdb2.sh7.agentos-app.net/api
+// 也可通过 .env 的 VITE_API_BASE 覆盖
 
-import {
-  clearToken,
-  getBusinessApiBase,
-  getToken,
-  setBusinessApiBase,
-} from './storage';
+import { clearToken, getToken } from './storage';
 
 // ========== 基础配置 ==========
-// 对接文档：新后端 baseURL（硬编码）
-export const AUTH_API_BASE =
-  'https://aab2b9dab7609fdb2.sh7.agentos-app.net/api';
+const PROD_API_BASE = 'https://aab2b9dab7609fdb2.sh7.agentos-app.net/api';
+const DEV_API_BASE = 'http://localhost:82';
 
-// 业务后端 baseURL 由用户配置（对接文档未给出业务接口，统一让用户填）
-export { getBusinessApiBase, setBusinessApiBase };
+export const AUTH_API_BASE: string =
+  import.meta.env.VITE_API_BASE ||
+  (import.meta.env.DEV ? DEV_API_BASE : PROD_API_BASE);
 
 // ========== 错误类型 ==========
 export class ApiError extends Error {
@@ -77,7 +75,7 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: BodyInit | null;
   headers?: Record<string, string>;
-  withAuth?: boolean; // 默认 true；登录类接口传 false
+  withAuth?: boolean; // 默认 true；登录/注册接口传 false
   signal?: AbortSignal;
 }
 
@@ -114,123 +112,79 @@ const doRequest = async (
   return ensureOk(res, '请求失败');
 };
 
-// ========== 登录类请求（固定走新后端，不带 Authorization） ==========
+// ========== 登录 / 注册类请求（走本地后端，登录/注册不带 Authorization） ==========
+// 文档第八章：C 端接口统一前缀 /auth/c/
 export const authApi = {
-  // 1. 账号密码登录
+  // 1. 账号密码登录  POST /auth/c/doLogin
   doLogin: (params: {
     account: string;
-    password: string;
+    password: string; // 前端 SM2 加密后的 hex（对接文档第三章，禁止明文）
     validCode?: string;
     validCodeReqNo?: string;
     tenCode?: string;
   }) =>
-    doRequest(AUTH_API_BASE, 'auth/c/doLogin', {
+    doRequest(AUTH_API_BASE, '/auth/c/doLogin', {
       method: 'POST',
       body: JSON.stringify(params),
       withAuth: false,
     }),
 
-  // 2. 手机号 + 短信验证码登录
-  doLoginByPhone: (params: {
-    phone: string;
-    validCode: string;
-    validCodeReqNo: string;
+  // 2. 注册  POST /auth/c/register
+  //    密码前端 SM2 加密；返回 code=200 无 data，不自动登录，需跳登录页
+  register: (params: {
+    account: string;
+    password: string; // 前端 SM2 加密后的 hex
+    validCode?: string;
+    validCodeReqNo?: string;
   }) =>
-    doRequest(AUTH_API_BASE, 'auth/c/doLoginByPhone', {
+    doRequest(AUTH_API_BASE, '/auth/c/register', {
       method: 'POST',
       body: JSON.stringify(params),
       withAuth: false,
     }),
 
-  // 3. 邮箱 + 邮箱验证码登录
-  doLoginByEmail: (params: {
-    email: string;
-    validCode: string;
-    validCodeReqNo: string;
-  }) =>
-    doRequest(AUTH_API_BASE, 'auth/c/doLoginByEmail', {
-      method: 'POST',
-      body: JSON.stringify(params),
-      withAuth: false,
-    }),
-
-  // 4. 获取手机短信验证码（GET）
-  getPhoneValidCode: (phone: string) =>
-    doRequest(AUTH_API_BASE, `auth/c/getPhoneValidCode?phone=${encodeURIComponent(phone)}`, {
-      method: 'GET',
-      withAuth: false,
-    }),
-
-  // 5. 获取邮箱验证码（GET）
-  getEmailValidCode: (email: string) =>
-    doRequest(AUTH_API_BASE, `auth/c/getEmailValidCode?email=${encodeURIComponent(email)}`, {
-      method: 'GET',
-      withAuth: false,
-    }),
-
-  // 6. 图形验证码（GET）
+  // 3. 图形验证码  GET /auth/c/getPicCaptcha
+  //    返回：{ base64 图片, validCodeReqNo }
   getPicCaptcha: () =>
-    doRequest(AUTH_API_BASE, 'auth/c/getPicCaptcha', {
+    doRequest(AUTH_API_BASE, '/auth/c/getPicCaptcha', {
       method: 'GET',
       withAuth: false,
     }),
 
-  // 7. 获取当前登录用户
+  // 4. 获取当前登录用户  GET /auth/c/getLoginUser（需 Authorization）
   getLoginUser: () =>
-    doRequest(AUTH_API_BASE, 'auth/c/getLoginUser', {
+    doRequest(AUTH_API_BASE, '/auth/c/getLoginUser', {
       method: 'GET',
     }),
 
-  // 8. 登出
+  // 5. 登出  GET /auth/c/doLogout（需 Authorization）
   doLogout: () =>
-    doRequest(AUTH_API_BASE, 'auth/c/doLogout', {
+    doRequest(AUTH_API_BASE, '/auth/c/doLogout', {
       method: 'GET',
     }),
 };
 
-// ========== 业务类请求（走用户配置的业务后端 baseURL） ==========
-// 业务 baseURL 为空时，调用方应避免触发业务请求；此处直接抛错以提示配置。
-const requireBusinessBase = (): string => {
-  const base = getBusinessApiBase();
-  if (!base) {
-    throw new ApiError(
-      0,
-      '未配置业务接口地址：请在「设置 → 业务接口地址」中填写后端 baseURL',
-    );
-  }
-  return base;
-};
-
+// ========== 业务类请求（统一走本地后端 AUTH_API_BASE，需 Authorization） ==========
 export const businessApi = {
-  // 业务通用 GET/POST
-  get: (path: string, options?: Omit<RequestOptions, 'method' | 'body'>) =>
-    doRequest(requireBusinessBase(), path, { ...(options || {}), method: 'GET' }),
-  post: (path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>) =>
-    doRequest(requireBusinessBase(), path, {
-      ...(options || {}),
-      method: 'POST',
-      body: body == null ? null : JSON.stringify(body),
-    }),
-
   // 笔记
-  getNotes: () => doRequest(requireBusinessBase(), 'api/notes', { method: 'GET' }),
+  getNotes: () => doRequest(AUTH_API_BASE, '/api/notes', { method: 'GET' }),
   saveNotes: (notes: unknown) =>
-    doRequest(requireBusinessBase(), 'api/notes', {
+    doRequest(AUTH_API_BASE, '/api/notes', {
       method: 'POST',
       body: JSON.stringify({ notes }),
     }),
 
   // AI 配置
-  getAiConfig: () => doRequest(requireBusinessBase(), 'api/ai-config', { method: 'GET' }),
+  getAiConfig: () => doRequest(AUTH_API_BASE, '/api/ai-config', { method: 'GET' }),
   saveAiConfig: (cfg: unknown) =>
-    doRequest(requireBusinessBase(), 'api/ai-config', {
+    doRequest(AUTH_API_BASE, '/api/ai-config', {
       method: 'POST',
       body: JSON.stringify(cfg),
     }),
 
   // AI 总结
   summarize: (content: string) =>
-    doRequest(requireBusinessBase(), 'api/summarize', {
+    doRequest(AUTH_API_BASE, '/api/summarize', {
       method: 'POST',
       body: JSON.stringify({ content }),
     }),
@@ -239,7 +193,7 @@ export const businessApi = {
   upload: (file: File) => {
     const formData = new FormData();
     formData.append('image', file);
-    return doRequest(requireBusinessBase(), 'api/upload', {
+    return doRequest(AUTH_API_BASE, '/api/upload', {
       method: 'POST',
       body: formData,
     });

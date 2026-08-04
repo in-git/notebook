@@ -11,8 +11,7 @@
   },
   "dependencies": {
     "@icon-park/vue-next": "^1.4.2",
-    "quill": "^2.0.3",
-    "quill-image-resize-module": "^3.0.0",
+    "aieditor": "^1.4.2",
     "sm-crypto": "^0.3.13",
     "vue": "^3.5.13"
   },

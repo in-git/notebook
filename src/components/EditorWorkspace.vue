@@ -1,19 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, onUnmounted } from 'vue';
 import {
   Copy,
   Delete,
   Magic,
+  Picture as PictureIcon,
   Setting as SettingIcon,
 } from '@icon-park/vue-next';
-import Quill from 'quill';
-import ImageResize from 'quill-image-resize-module';
-import { ApiError, businessApi } from '../lib/api';
-import { getBusinessApiBase } from '../lib/storage';
+import { AiEditor } from 'aieditor';
+import 'aieditor/dist/style.css';
+import { businessApi } from '../lib/api';
+import { getToken } from '../lib/storage';
 import type { Note, User as UserType } from '../types/note';
-
-// 注册图片缩放模块（UMD 形式，npm 引入需手动注册到 Quill 实例）
-Quill.register('modules/imageResize', ImageResize);
 
 const props = defineProps<{
   currentNote?: Note;
@@ -33,9 +31,10 @@ const emit = defineEmits([
   'titleInput',
   'manualAiSummary',
   'openSettings',
+  'openImageTools',
   'copyNote',
   'deleteNote',
-  'quillReady',
+  'aiEditorReady',
 ]);
 
 // 上传错误提示
@@ -91,72 +90,75 @@ const convertToWebp = async (file: File, quality = 0.85): Promise<File> => {
   }
 };
 
+// 文件转 base64 dataURL（未登录时图片内嵌到内容，纯本地保存）
+const fileToDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+let aiEditor: AiEditor | null = null;
+
 onMounted(async () => {
-  const quill = new Quill('#editor-container', {
-    theme: 'snow',
+  aiEditor = new AiEditor({
+    element: '#editor-container',
     placeholder: '键入富文本内容，失焦后 AI 将自动总结标题...',
-    modules: {
-      toolbar: [
-        ['bold', 'italic', 'underline', 'strike'],
-        ['blockquote', 'code-block'],
-        [{ header: 1 }, { header: 2 }],
-        [{ list: 'ordered' }, { list: 'bullet' }],
-        [{ color: [] }, { background: [] }],
-        ['image'],
-        ['clean'],
-      ],
-      imageResize: {},
+    content: '',
+    image: {
+      // 自定义上传：登录走云端 businessApi.upload；未登录转 base64 内嵌（纯本地保存）
+      // uploader 签名：(file, uploadUrl, headers, formName) => Promise<Record<string, any>>
+      // AiEditor 期望返回 { errorCode: 0, data: { src, href } }
+      uploader: async (file: File) => {
+        try {
+          // 上传前做 webp 压缩（减小体积，base64 模式同样受益）
+          const processed = await convertToWebp(file);
+
+          // 未登录：转 base64 内嵌，数据完全保存在本地
+          if (!getToken()) {
+            const dataUrl = await fileToDataUrl(processed);
+            return { errorCode: 0, data: { src: dataUrl, href: dataUrl } };
+          }
+
+          // 已登录：上传到云端
+          const resp = (await businessApi.upload(processed)) as Record<string, unknown>;
+          // 适配后端响应：兼容多种字段名
+          const inner = (resp.data || resp.result || resp) as Record<string, unknown>;
+          const src =
+            (typeof inner.src === 'string' && inner.src) ||
+            (typeof inner.url === 'string' && inner.url) ||
+            (typeof inner.href === 'string' && inner.href) ||
+            (typeof resp.url === 'string' && resp.url) ||
+            (typeof resp.src === 'string' && resp.src) ||
+            '';
+          if (!src) {
+            return { errorCode: 1, errorMsg: '上传成功但未返回图片地址' };
+          }
+          // 若返回相对路径，拼接 baseURL
+          const fullSrc = src.startsWith('http')
+            ? src
+            : (import.meta.env.VITE_API_BASE ||
+                (import.meta.env.DEV
+                  ? 'http://localhost:82'
+                  : 'https://aab2b9dab7609fdb2.sh7.agentos-app.net/api')) +
+              (src.startsWith('/') ? src : '/' + src);
+          return { errorCode: 0, data: { src: fullSrc, href: fullSrc } };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : '图片上传失败';
+          return { errorCode: 1, errorMsg: msg };
+        }
+      },
+    },
+    onCreated: () => {
+      // 将 AiEditor 实例本身传给父组件（注意：不是回调参数里的 editor）
+      emit('aiEditorReady', aiEditor);
     },
   });
+});
 
-  const uploadImageToServer = async (file: File) => {
-    if (!getBusinessApiBase()) {
-      uploadError.value = '请先在「设置」中配置业务接口地址再上传图片';
-      return;
-    }
-    const uploadFile = await convertToWebp(file);
-    const formData = new FormData();
-    formData.append('image', uploadFile);
-    try {
-      const data = (await businessApi.upload(uploadFile)) as { url?: string };
-      if (data && data.url) {
-        const range = quill.getSelection(true);
-        quill.insertEmbed(range.index, 'image', data.url);
-        quill.setSelection(range.index + 1);
-      }
-    } catch (error) {
-      const msg = error instanceof ApiError ? error.message : '图片上传失败';
-      uploadError.value = msg;
-    }
-  };
-
-  const toolbarModule = quill.getModule('toolbar') as {
-    addHandler: (name: string, handler: () => void) => void;
-  };
-  toolbarModule.addHandler('image', () => {
-    const input = document.createElement('input');
-    input.setAttribute('type', 'file');
-    input.setAttribute('accept', 'image/*');
-    input.click();
-    input.onchange = () => {
-      if (input.files && input.files[0]) uploadImageToServer(input.files[0]);
-    };
-  });
-
-  quill.root.addEventListener('paste', (event: ClipboardEvent) => {
-    const items = event.clipboardData?.items;
-    if (!items) return;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith('image/')) {
-        event.preventDefault();
-        const file = items[i].getAsFile();
-        if (file) uploadImageToServer(file);
-        break;
-      }
-    }
-  });
-
-  emit('quillReady', quill);
+onUnmounted(() => {
+  aiEditor?.destroy();
 });
 </script>
 
@@ -186,6 +188,13 @@ onMounted(async () => {
         </button>
         <button
           class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-white"
+          @click="emit('openImageTools')"
+          title="图片处理"
+        >
+          <picture-icon theme="outline" size="15" :stroke-width="3" />
+        </button>
+        <button
+          class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-white"
           @click="emit('copyNote')"
           title="复制纯文本"
         >
@@ -204,7 +213,7 @@ onMounted(async () => {
     <!-- 编辑器主体 -->
     <div
       v-show="currentNote"
-      class="h-full flex flex-col px-[60px] overflow-auto"
+      class="h-full flex flex-col px-4 overflow-auto"
     >
       <div class="flex-1 flex flex-col gap-4 overflow-hidden pt-4">
         <input
@@ -223,11 +232,11 @@ onMounted(async () => {
         />
         <div
           id="editor-container"
-          class="flex-1 bg-transparent border-none flex flex-col overflow-auto"
+          class="flex-1 bg-transparent border-none flex flex-col overflow-auto aieditor-container"
         ></div>
       </div>
       <div
-        class="flex justify-between items-center text-[13px] text-[#86868b] absolute bottom-8 right-8 gap-4 pb-2"
+        class="flex justify-between items-center text-[14px] text-[#86868b] absolute bottom-8 right-8 gap-4 pb-2"
       >
         <div class="flex items-center gap-1.5">
           <span
@@ -252,7 +261,7 @@ onMounted(async () => {
         class="w-20 h-20 rounded-2xl shadow-[0_4px_16px_rgba(0,0,0,0.06)]"
       />
       <p class="text-[14px] mt-1">未选择便签</p>
-      <p class="text-[12px] text-[#c7c7cc]">
+      <p class="text-[14px] text-[#c7c7cc]">
         点击右上角 + 新建，或在设置中登录开启云同步
       </p>
     </div>

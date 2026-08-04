@@ -32,16 +32,16 @@ export const NOTE_COLORS: NoteColor[] = [
 ];
 
 // ========== 用户 / 鉴权 ==========
-// UI 用的最小用户信息（兼容账号/手机/邮箱三种登录）
+// UI 用的最小用户信息（仅账号密码登录）
 export interface User {
-  // 展示名（优先用 username，否则手机号/邮箱）
+  // 展示名（优先用 username，否则用账号）
   username: string;
-  // 登录方式
-  loginType: 'account' | 'phone' | 'email';
-  // 实际账号（账号/手机号/邮箱）
+  // 登录方式（当前仅 account）
+  loginType: 'account';
+  // 实际账号
   account: string;
 }
 
 // ========== 登录方式 ==========
 export type AuthMode = 'login' | 'register';
-export type LoginChannel = 'account' | 'phone' | 'email';
+export type LoginChannel = 'account';

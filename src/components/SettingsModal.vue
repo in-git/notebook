@@ -3,8 +3,6 @@ import {
   Check,
   Close,
   Lock,
-  Message,
-  Phone,
   PreviewCloseOne,
   PreviewOpen,
   Refresh,
@@ -14,10 +12,7 @@ import {
 } from '@icon-park/vue-next';
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { ApiError, authApi } from '../lib/api';
-import {
-  getBusinessApiBase,
-  setBusinessApiBase,
-} from '../lib/storage';
+import { getCaptchaOpen } from '../lib/storage';
 import type { User as UserType } from '../types/note';
 
 const props = defineProps<{
@@ -34,84 +29,51 @@ const emit = defineEmits<{
   (e: 'saveConfig'): void;
   (e: 'submitAuth', params: {
     mode: 'login' | 'register';
-    channel: 'account' | 'phone' | 'email';
     account: string;
-    password?: string;
+    password: string;
     validCode?: string;
     validCodeReqNo?: string;
     rememberAccount: boolean;
-    businessApiBase?: string;
   }): void;
   (e: 'logout'): void;
 }>();
 
 // ========== 本地状态 ==========
-const channel = ref<'account' | 'phone' | 'email'>('account');
+const mode = ref<'login' | 'register'>('login');
 const showPassword = ref(false);
+const showConfirmPassword = ref(false);
 const account = ref(props.rememberedAccount || '');
 const password = ref('');
-const validCode = ref(''); // 图形/短信/邮箱 验证码
+const confirmPassword = ref('');
+const validCode = ref(''); // 图形验证码
 const validCodeReqNo = ref(''); // 验证码请求号（来自后端返回）
 const rememberMe = ref(false);
 const captchaImage = ref(''); // 图形验证码 base64
-const captchaOpen = ref(false); // 是否启用图形验证码
-const businessApiBase = ref(getBusinessApiBase());
+const captchaOpen = ref(getCaptchaOpen()); // 是否启用图形验证码（来自系统配置）
 const authError = ref('');
 const authLoading = ref(false);
 
-// 倒计时（短信/邮箱 60s）
-const sendCooldown = ref(0);
-let cooldownTimer: number | null = null;
-const startCooldown = (seconds: number) => {
-  sendCooldown.value = seconds;
-  if (cooldownTimer) clearInterval(cooldownTimer);
-  cooldownTimer = window.setInterval(() => {
-    sendCooldown.value -= 1;
-    if (sendCooldown.value <= 0 && cooldownTimer) {
-      clearInterval(cooldownTimer);
-      cooldownTimer = null;
-    }
-  }, 1000);
-};
-onUnmounted(() => {
-  if (cooldownTimer) clearInterval(cooldownTimer);
-});
-
-// ========== 校验正则（对接文档第七章） ==========
-const PHONE_RE = /^(13[0-9]|14[579]|15[0-3,5-9]|16[6]|17[0135678]|18[0-9]|19[89])\d{8}$/;
-const EMAIL_RE = /^[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+)+$/;
-
-const isAccountValid = computed(() => {
-  if (channel.value === 'phone') return PHONE_RE.test(account.value);
-  if (channel.value === 'email') return EMAIL_RE.test(account.value);
-  // 账号登录对接文档未限制具体规则，至少 1 位即可
-  return account.value.trim().length > 0;
-});
-
-const isPasswordValid = computed(() => {
-  if (channel.value !== 'account') return true;
-  return password.value.length >= 6;
-});
-
-const isValidCodeFilled = computed(() => {
-  if (channel.value === 'account' && captchaOpen.value) return validCode.value.length > 0;
-  if (channel.value === 'phone' || channel.value === 'email') return validCode.value.length >= 4;
-  return true;
-});
+// ========== 校验 ==========
+// 账号至少 1 位；密码至少 6 位
+const isAccountValid = computed(() => account.value.trim().length > 0);
+const isPasswordValid = computed(() => password.value.length >= 6);
+const isConfirmValid = computed(() =>
+  mode.value === 'register'
+    ? confirmPassword.value === password.value && confirmPassword.value.length >= 6
+    : true,
+);
+const isValidCodeFilled = computed(() =>
+  captchaOpen.value ? validCode.value.length > 0 : true,
+);
 
 const canSubmit = computed(
   () =>
     !authLoading.value &&
     isAccountValid.value &&
     isPasswordValid.value &&
+    isConfirmValid.value &&
     isValidCodeFilled.value,
 );
-
-const channelLabels: Record<typeof channel.value, string> = {
-  account: '账号',
-  phone: '手机号',
-  email: '邮箱',
-};
 
 const isLoggedIn = computed(() => !!props.currentUser);
 const usernameInitial = computed(() => {
@@ -119,33 +81,37 @@ const usernameInitial = computed(() => {
   return u.charAt(0).toUpperCase();
 });
 
-// ========== 切换 channel 重置状态 ==========
+// ========== 切换模式重置状态 ==========
 const resetForm = () => {
   password.value = '';
+  confirmPassword.value = '';
   validCode.value = '';
   validCodeReqNo.value = '';
   authError.value = '';
   captchaImage.value = '';
 };
 
-watch(channel, () => {
+watch(mode, () => {
   resetForm();
+  // 注册模式也需图形验证码（若开关开启）
+  if (captchaOpen.value && !captchaImage.value) {
+    loadPicCaptcha();
+  }
 });
 
-// 打开时初始化业务 baseURL 显示
+// 打开时同步验证码开关并按需加载图形验证码
 watch(
   () => props.show,
   (v) => {
     if (v) {
-      businessApiBase.value = getBusinessApiBase();
+      captchaOpen.value = getCaptchaOpen();
+      // 文档第一章：验证码开关开启时，账号登录需展示图形验证码
+      if (captchaOpen.value && !captchaImage.value) {
+        loadPicCaptcha();
+      }
     }
   },
 );
-
-// ========== 业务 baseURL 失焦保存 ==========
-const onBusinessBaseBlur = () => {
-  setBusinessApiBase(businessApiBase.value.trim());
-};
 
 // ========== 图形验证码 ==========
 const loadPicCaptcha = async () => {
@@ -166,56 +132,58 @@ const loadPicCaptcha = async () => {
   }
 };
 
-// ========== 发送验证码（短信 / 邮箱） ==========
-const sendValidCode = async () => {
-  if (sendCooldown.value > 0) return;
-  if (!isAccountValid.value) {
-    authError.value = `请输入正确的${channelLabels[channel.value]}`;
-    return;
-  }
-  authError.value = '';
-  try {
-    if (channel.value === 'phone') {
-      await authApi.getPhoneValidCode(account.value);
-    } else if (channel.value === 'email') {
-      await authApi.getEmailValidCode(account.value);
-    }
-    startCooldown(60);
-  } catch (e) {
-    const msg = e instanceof ApiError ? e.message : '验证码发送失败';
-    authError.value = msg;
-  }
-};
-
-// ========== 提交登录 ==========
+// ========== 提交登录 / 注册 ==========
 const onSubmit = async () => {
   if (!canSubmit.value) return;
+  if (mode.value === 'register' && confirmPassword.value !== password.value) {
+    authError.value = '两次输入的密码不一致';
+    return;
+  }
   authError.value = '';
   authLoading.value = true;
   try {
     emit('submitAuth', {
-      mode: 'login',
-      channel: channel.value,
+      mode: mode.value,
       account: account.value.trim(),
-      password: password.value || undefined,
+      password: password.value,
       validCode: validCode.value || undefined,
       validCodeReqNo: validCodeReqNo.value || undefined,
       rememberAccount: rememberMe.value,
-      businessApiBase: businessApiBase.value.trim(),
     });
   } catch (e) {
-    const msg = e instanceof ApiError ? e.message : '登录失败';
+    const msg = e instanceof ApiError ? e.message : mode.value === 'register' ? '注册失败' : '登录失败';
     authError.value = msg;
   } finally {
     authLoading.value = false;
   }
 };
 
+// 切换到注册
+const switchToRegister = () => {
+  mode.value = 'register';
+};
+// 切换到登录
+const switchToLogin = () => {
+  mode.value = 'login';
+};
+
 // 接收父组件透传的登录错误
+// 文档第一章：登录失败且验证码开启 → 主动刷新图形验证码
 defineExpose({
   setError: (msg: string) => {
     authError.value = msg;
   },
+  refreshCaptchaIfOpen: () => {
+    captchaOpen.value = getCaptchaOpen();
+    if (captchaOpen.value) {
+      validCode.value = '';
+      loadPicCaptcha();
+    }
+  },
+});
+
+onUnmounted(() => {
+  /* noop */
 });
 </script>
 
@@ -263,52 +231,42 @@ defineExpose({
               :stroke-width="3"
               class="text-[#0071e3]"
             />
-            <span class="text-[13px] font-medium text-[#1d1d1f]">账户</span>
-            <span class="text-[12px] text-[#86868b] ml-1">
+            <span class="text-[14px] font-medium text-[#1d1d1f]">账户</span>
+            <span class="text-[14px] text-[#86868b] ml-1">
               登录后可在多端同步便签
             </span>
           </div>
 
-          <!-- 登录方式 tab：账号 / 手机号 / 邮箱 -->
+          <!-- 登录 / 注册 tab -->
           <div class="flex bg-black/[0.04] rounded-xl p-0.5 mb-4">
             <button
-              v-for="opt in [
-                { v: 'account', label: '账号' },
-                { v: 'phone', label: '手机号' },
-                { v: 'email', label: '邮箱' },
-              ]"
-              :key="opt.v"
-              @click="channel = opt.v as any"
-              class="flex-1 py-1.5 text-[13px] font-medium rounded-lg transition"
+              @click="switchToLogin"
+              class="flex-1 py-1.5 text-[14px] font-medium rounded-lg transition"
               :class="
-                channel === opt.v
+                mode === 'login'
                   ? 'bg-white text-[#0071e3] shadow-sm'
                   : 'text-[#86868b] hover:text-[#1d1d1f]'
               "
             >
-              {{ opt.label }}
+              登录
+            </button>
+            <button
+              @click="switchToRegister"
+              class="flex-1 py-1.5 text-[14px] font-medium rounded-lg transition"
+              :class="
+                mode === 'register'
+                  ? 'bg-white text-[#0071e3] shadow-sm'
+                  : 'text-[#86868b] hover:text-[#1d1d1f]'
+              "
+            >
+              注册
             </button>
           </div>
 
           <form @submit.prevent="onSubmit" class="space-y-3">
-            <!-- 账号 / 手机 / 邮箱 输入框 -->
+            <!-- 账号输入框 -->
             <div class="relative">
               <user
-                v-if="channel === 'account'"
-                theme="outline"
-                size="14"
-                :stroke-width="3"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] pointer-events-none"
-              />
-              <phone
-                v-else-if="channel === 'phone'"
-                theme="outline"
-                size="14"
-                :stroke-width="3"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] pointer-events-none"
-              />
-              <message
-                v-else
                 theme="outline"
                 size="14"
                 :stroke-width="3"
@@ -317,20 +275,14 @@ defineExpose({
               <input
                 v-model="account"
                 type="text"
-                :placeholder="
-                  channel === 'phone'
-                    ? '请输入手机号'
-                    : channel === 'email'
-                      ? '请输入邮箱'
-                      : '请输入账号'
-                "
-                :autocomplete="channel === 'account' ? 'username' : 'off'"
+                placeholder="请输入账号"
+                autocomplete="username"
                 class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-3 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
               />
             </div>
 
-            <!-- 密码（仅账号登录） -->
-            <div v-if="channel === 'account'" class="relative">
+            <!-- 密码 -->
+            <div class="relative">
               <lock
                 theme="outline"
                 size="14"
@@ -341,7 +293,7 @@ defineExpose({
                 v-model="password"
                 :type="showPassword ? 'text' : 'password'"
                 placeholder="密码（至少 6 位）"
-                autocomplete="current-password"
+                :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
                 class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-10 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
               />
               <button
@@ -364,8 +316,43 @@ defineExpose({
               </button>
             </div>
 
-            <!-- 验证码：账号登录 = 图形验证码；手机/邮箱 = 短信/邮箱验证码 -->
-            <div v-if="channel === 'account' && captchaOpen" class="flex gap-2">
+            <!-- 确认密码（仅注册） -->
+            <div v-if="mode === 'register'" class="relative">
+              <lock
+                theme="outline"
+                size="14"
+                :stroke-width="3"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-[#86868b] pointer-events-none"
+              />
+              <input
+                v-model="confirmPassword"
+                :type="showConfirmPassword ? 'text' : 'password'"
+                placeholder="确认密码"
+                autocomplete="new-password"
+                class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-10 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
+              />
+              <button
+                type="button"
+                @click="showConfirmPassword = !showConfirmPassword"
+                class="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center text-[#86868b] hover:bg-black/5 transition"
+              >
+                <preview-open
+                  v-if="!showConfirmPassword"
+                  theme="outline"
+                  size="14"
+                  :stroke-width="3"
+                />
+                <preview-close-one
+                  v-else
+                  theme="outline"
+                  size="14"
+                  :stroke-width="3"
+                />
+              </button>
+            </div>
+
+            <!-- 图形验证码 -->
+            <div v-if="captchaOpen" class="flex gap-2">
               <input
                 v-model="validCode"
                 type="text"
@@ -393,41 +380,19 @@ defineExpose({
               </div>
             </div>
 
-            <div v-if="channel === 'phone' || channel === 'email'" class="flex gap-2">
-              <input
-                v-model="validCode"
-                type="text"
-                :placeholder="channel === 'phone' ? '短信验证码' : '邮箱验证码'"
-                class="flex-1 bg-black/[0.04] border-none rounded-xl px-3 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
-              />
-              <button
-                type="button"
-                @click="sendValidCode"
-                :disabled="sendCooldown > 0"
-                class="shrink-0 px-3 h-[42px] rounded-xl text-[13px] font-medium transition"
-                :class="
-                  sendCooldown > 0
-                    ? 'bg-black/[0.04] text-[#86868b] cursor-not-allowed'
-                    : 'bg-[#0071e3]/10 text-[#0071e3] hover:bg-[#0071e3]/15'
-                "
-              >
-                {{ sendCooldown > 0 ? `${sendCooldown}s` : '获取验证码' }}
-              </button>
-            </div>
-
-            <!-- 记住账号 -->
-            <label class="flex items-center gap-2 cursor-pointer pl-1">
+            <!-- 记住账号（仅登录） -->
+            <label v-if="mode === 'login'" class="flex items-center gap-2 cursor-pointer pl-1">
               <input
                 v-model="rememberMe"
                 type="checkbox"
                 class="w-[14px] h-[14px] accent-[#0071e3]"
               />
-              <span class="text-[12px] text-[#86868b]">记住账号</span>
+              <span class="text-[14px] text-[#86868b]">记住账号</span>
             </label>
 
             <div
               v-if="authError"
-              class="text-[12px] text-[#ff3b30] pl-1"
+              class="text-[14px] text-[#ff3b30] pl-1"
             >
               {{ authError }}
             </div>
@@ -443,12 +408,22 @@ defineExpose({
                 size="14"
                 :stroke-width="4"
               />
-              <span>{{ authLoading ? '处理中...' : '登录' }}</span>
+              <span>{{
+                authLoading
+                  ? '处理中...'
+                  : mode === 'register'
+                    ? '注册'
+                    : '登录'
+              }}</span>
             </button>
           </form>
 
-          <p class="text-[12px] text-[#86868b] mt-3 text-center">
-            登录后，本地便签将自动同步到云端
+          <p class="text-[14px] text-[#86868b] mt-3 text-center">
+            {{
+              mode === 'register'
+                ? '注册成功后将自动登录'
+                : '登录后，本地便签将自动同步到云端'
+            }}
           </p>
         </div>
 
@@ -461,12 +436,7 @@ defineExpose({
               :stroke-width="3"
               class="text-[#0071e3]"
             />
-            <span class="text-[13px] font-medium text-[#1d1d1f]">当前账户</span>
-            <span
-              v-if="!cloudMode"
-              class="text-[11px] text-[#ff9500] bg-[#ff9500]/10 px-2 py-0.5 rounded-full ml-1"
-              >未配置业务接口</span
-            >
+            <span class="text-[14px] font-medium text-[#1d1d1f]">当前账户</span>
           </div>
           <div
             class="flex items-center gap-3 p-3 bg-black/[0.03] rounded-xl mb-3"
@@ -481,7 +451,7 @@ defineExpose({
                 {{ currentUser?.username }}
               </div>
               <div
-                class="text-[12px] flex items-center gap-1"
+                class="text-[14px] flex items-center gap-1"
                 :class="cloudMode ? 'text-[#34c759]' : 'text-[#86868b]'"
               >
                 <check v-if="cloudMode" theme="outline" size="10" :stroke-width="4" />
@@ -498,30 +468,8 @@ defineExpose({
             <switch-button theme="outline" size="14" :stroke-width="3" />
             退出登录
           </button>
-          <p class="text-[12px] text-[#86868b] mt-2 text-center">
+          <p class="text-[14px] text-[#86868b] mt-2 text-center">
             退出后将以本地模式继续使用，数据保留在本设备
-          </p>
-        </div>
-
-        <!-- 分割线 -->
-        <div class="border-t border-black/[0.06]"></div>
-
-        <!-- 业务接口地址配置 -->
-        <div>
-          <div class="flex items-center gap-2 mb-2">
-            <span class="text-[13px] font-medium text-[#1d1d1f]">业务接口地址</span>
-            <span class="text-[12px] text-[#86868b]">便签/AI/上传</span>
-          </div>
-          <input
-            v-model="businessApiBase"
-            @blur="onBusinessBaseBlur"
-            type="text"
-            placeholder="例如：https://your-api.example.com"
-            class="w-full bg-black/[0.04] border-none rounded-xl px-3 py-2.5 text-[13px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition font-mono"
-          />
-          <p class="text-[11px] text-[#86868b] mt-1.5 leading-relaxed">
-            留空时，登录用户也以本地模式运行；填写后便签/AI/图片上传将调用该地址的
-            <code class="bg-black/[0.04] px-1 rounded">/api/notes</code> 等接口。
           </p>
         </div>
 
@@ -536,7 +484,7 @@ defineExpose({
             >
               AI 自动总结标题
             </div>
-            <div class="text-[12px] text-[#86868b] mt-0.5">
+            <div class="text-[14px] text-[#86868b] mt-0.5">
               失焦后自动调用 AI 为便签生成标题
             </div>
           </div>

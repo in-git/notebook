@@ -2,15 +2,15 @@
 // - CLIENT_TOKEN: C端鉴权凭证，区分后台管理端 token
 // - CLIENT_USER_INFO: 登录用户信息
 // - REMEMBER_ACCOUNT: 勾选记住我，仅存放账号字符串
-// - BUSINESS_API_BASE: 业务后端 baseURL（用户可配置；空时降级本地）
-// - LOCAL_NOTES_KEY / LOCAL_AI_CONFIG_KEY: 未登录/未配置业务 baseURL 时的本地数据
+// - CAPTCHA_OPEN: 图形验证码开关（系统配置接口返回）
+// - LOCAL_NOTES_KEY / LOCAL_AI_CONFIG_KEY: 未登录时的本地数据
 //
+// 业务后端地址固定为本地 http://localhost:82，不再由用户配置。
 // 所有读写封装在工具函数中，避免散落在各组件里。
 
 const CLIENT_TOKEN = 'CLIENT_TOKEN';
 const CLIENT_USER_INFO = 'CLIENT_USER_INFO';
 const REMEMBER_ACCOUNT = 'REMEMBER_ACCOUNT';
-const BUSINESS_API_BASE = 'BUSINESS_API_BASE';
 const CAPTCHA_OPEN = 'CAPTCHA_OPEN';
 export const LOCAL_NOTES_KEY = 'apple_notes_data_ai';
 export const LOCAL_AI_CONFIG_KEY = 'ai_config';
@@ -70,15 +70,6 @@ export const getRememberedAccount = (): string | null => safeGet(REMEMBER_ACCOUN
 export const setRememberedAccount = (account: string): void =>
   safeSet(REMEMBER_ACCOUNT, account);
 export const clearRememberedAccount = (): void => safeRemove(REMEMBER_ACCOUNT);
-
-// ========== 业务后端 baseURL（用户可配置） ==========
-export const getBusinessApiBase = (): string => {
-  const raw = safeGet(BUSINESS_API_BASE);
-  return (raw || '').trim();
-};
-export const setBusinessApiBase = (base: string): void =>
-  safeSet(BUSINESS_API_BASE, base);
-export const clearBusinessApiBase = (): void => safeRemove(BUSINESS_API_BASE);
 
 // ========== 验证码开关（系统配置接口返回） ==========
 export const getCaptchaOpen = (): boolean => {
