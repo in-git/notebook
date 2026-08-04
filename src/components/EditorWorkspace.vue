@@ -4,13 +4,11 @@ import {
   Copy,
   Delete,
   Magic,
-  Picture as PictureIcon,
   Setting as SettingIcon,
 } from '@icon-park/vue-next';
 import { AiEditor } from 'aieditor';
 import 'aieditor/dist/style.css';
-import { businessApi } from '../lib/api';
-import { getToken } from '../lib/storage';
+import { fileApi } from '../lib/api';
 import type { Note, User as UserType } from '../types/note';
 
 const props = defineProps<{
@@ -31,7 +29,6 @@ const emit = defineEmits([
   'titleInput',
   'manualAiSummary',
   'openSettings',
-  'openImageTools',
   'copyNote',
   'deleteNote',
   'aiEditorReady',
@@ -90,16 +87,37 @@ const convertToWebp = async (file: File, quality = 0.85): Promise<File> => {
   }
 };
 
-// 文件转 base64 dataURL（未登录时图片内嵌到内容，纯本地保存）
-const fileToDataUrl = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-
 let aiEditor: AiEditor | null = null;
+
+// 自定义图片上传：调用 /client/c/fileFolder/upload（对接文档：md/C端文件上传对接文档.md）
+// AiEditor 要求 uploader 返回 { errorCode: 0, data: { src, alt, ... } }
+const imageUploader = async (
+  file: File,
+): Promise<Record<string, unknown>> => {
+  // 前端预校验：后缀白名单 + 大小（文档第七章硬约束 5/6）
+  const extErr = fileApi.validateImageExt(file);
+  if (extErr) {
+    uploadError.value = extErr;
+    throw new Error(extErr);
+  }
+  const sizeErr = fileApi.validateSize(file, 20);
+  if (sizeErr) {
+    uploadError.value = sizeErr;
+    throw new Error(sizeErr);
+  }
+
+  // 先转 webp 压缩再上传（减少带宽）
+  const webpFile = await convertToWebp(file);
+  const result = await fileApi.upload(webpFile);
+  // AiEditor 期望的返回格式
+  return {
+    errorCode: 0,
+    data: {
+      src: result.url,
+      alt: result.name,
+    },
+  };
+};
 
 onMounted(async () => {
   aiEditor = new AiEditor({
@@ -107,47 +125,16 @@ onMounted(async () => {
     placeholder: '键入富文本内容，失焦后 AI 将自动总结标题...',
     content: '',
     image: {
-      // 自定义上传：登录走云端 businessApi.upload；未登录转 base64 内嵌（纯本地保存）
-      // uploader 签名：(file, uploadUrl, headers, formName) => Promise<Record<string, any>>
-      // AiEditor 期望返回 { errorCode: 0, data: { src, href } }
-      uploader: async (file: File) => {
-        try {
-          // 上传前做 webp 压缩（减小体积，base64 模式同样受益）
-          const processed = await convertToWebp(file);
-
-          // 未登录：转 base64 内嵌，数据完全保存在本地
-          if (!getToken()) {
-            const dataUrl = await fileToDataUrl(processed);
-            return { errorCode: 0, data: { src: dataUrl, href: dataUrl } };
-          }
-
-          // 已登录：上传到云端
-          const resp = (await businessApi.upload(processed)) as Record<string, unknown>;
-          // 适配后端响应：兼容多种字段名
-          const inner = (resp.data || resp.result || resp) as Record<string, unknown>;
-          const src =
-            (typeof inner.src === 'string' && inner.src) ||
-            (typeof inner.url === 'string' && inner.url) ||
-            (typeof inner.href === 'string' && inner.href) ||
-            (typeof resp.url === 'string' && resp.url) ||
-            (typeof resp.src === 'string' && resp.src) ||
-            '';
-          if (!src) {
-            return { errorCode: 1, errorMsg: '上传成功但未返回图片地址' };
-          }
-          // 若返回相对路径，拼接 baseURL
-          const fullSrc = src.startsWith('http')
-            ? src
-            : (import.meta.env.VITE_API_BASE ||
-                (import.meta.env.DEV
-                  ? 'http://localhost:82'
-                  : 'https://aab2b9dab7609fdb2.sh7.agentos-app.net/api')) +
-              (src.startsWith('/') ? src : '/' + src);
-          return { errorCode: 0, data: { src: fullSrc, href: fullSrc } };
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : '图片上传失败';
-          return { errorCode: 1, errorMsg: msg };
-        }
+      // 自定义 uploader，直接调用新接口，不使用 uploadUrl
+      uploader: (file: File) => imageUploader(file),
+      uploaderEvent: {
+        onFailed: (_file: File, _response: any) => {
+          if (!uploadError.value) uploadError.value = '图片上传失败';
+        },
+        onError: (_file: File, err: any) => {
+          uploadError.value =
+            err instanceof Error ? err.message : '图片上传异常';
+        },
       },
     },
     onCreated: () => {
@@ -185,13 +172,6 @@ onUnmounted(() => {
           title="设置"
         >
           <setting-icon theme="outline" size="15" :stroke-width="3" />
-        </button>
-        <button
-          class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-white"
-          @click="emit('openImageTools')"
-          title="图片处理"
-        >
-          <picture-icon theme="outline" size="15" :stroke-width="3" />
         </button>
         <button
           class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-white"
@@ -236,7 +216,7 @@ onUnmounted(() => {
         ></div>
       </div>
       <div
-        class="flex justify-between items-center text-[14px] text-[#86868b] absolute bottom-8 right-8 gap-4 pb-2"
+        class="flex justify-between items-center text-[13px] text-[#86868b] absolute bottom-8 right-8 gap-4 pb-2"
       >
         <div class="flex items-center gap-1.5">
           <span
@@ -261,7 +241,7 @@ onUnmounted(() => {
         class="w-20 h-20 rounded-2xl shadow-[0_4px_16px_rgba(0,0,0,0.06)]"
       />
       <p class="text-[14px] mt-1">未选择便签</p>
-      <p class="text-[14px] text-[#c7c7cc]">
+      <p class="text-[12px] text-[#c7c7cc]">
         点击右上角 + 新建，或在设置中登录开启云同步
       </p>
     </div>

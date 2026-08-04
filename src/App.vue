@@ -3,16 +3,16 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import ColorPopover from './components/ColorPopover.vue';
 import CustomAlert from './components/CustomAlert.vue';
 import EditorWorkspace from './components/EditorWorkspace.vue';
-import ImageTools from './components/ImageTools.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import Sidebar from './components/Sidebar.vue';
 import Toast from './components/Toast.vue';
-import { ApiError, authApi, businessApi } from './lib/api';
+import { ApiError, aiApi, authApi, businessApi, userNoteApi } from './lib/api';
 import { sm2Encrypt } from './lib/sm2';
 import {
   clearAuth,
   getRememberedAccount,
   getToken,
+  getUserId,
   getUserInfo,
   LOCAL_AI_CONFIG_KEY,
   LOCAL_NOTES_KEY,
@@ -30,7 +30,6 @@ const activeColorFilter = ref<string | null>(null);
 const currentTitle = ref('');
 const wordCount = ref(0);
 const isSettingsOpen = ref(false);
-const isImageToolsOpen = ref(false);
 const settingsModalRef = ref<InstanceType<typeof SettingsModal> | null>(null);
 const isAiLoading = ref(false);
 const aiStatusText = ref('AI 总结已关闭');
@@ -121,9 +120,9 @@ const persistNotes = async () => {
     }
     return;
   }
-  // 云端模式：调用业务接口
+  // 云端模式：调用便签接口（/dev/userNote/save，需 userId）
   try {
-    await businessApi.saveNotes(notes.value);
+    await userNoteApi.saveNote({ notes: notes.value });
   } catch (e) {
     console.error('保存笔记失败:', e);
   }
@@ -135,7 +134,7 @@ const flushNotesBeacon = () => {
       const blob = new Blob([JSON.stringify({ notes: notes.value })], {
         type: 'application/json',
       });
-      // sendBeacon 走 fetch 不便携带 Authorization 头，故不适用于新接口；
+      // sendBeacon 走 fetch 不便携带 token 头，故不适用于新接口；
       // 关页面前最后一次保存通过 persistNotes（同步写 localStorage）。
     } catch (e) {
       // 忽略
@@ -240,12 +239,14 @@ const cleanupEmptyNotes = () => {
 };
 
 // 登录成功后调用：对接文档第四章 afterLogin 流程
-// 1. token 已由 setToken 写入（请求拦截器自动放入 Authorization）
-// 2. 调用 /auth/c/getLoginUser 获取用户信息，存入 CLIENT_USER_INFO
-// 3. 加载业务数据
+// 1. token 已由 setToken 写入（请求拦截器自动放入 token 请求头）
+// 2. 调用 /auth/c/getLoginUser 获取用户信息（含 id），存入 CLIENT_USER_INFO
+//    —— md/C端用户信息对接文档.md：data.id 即用户 ID，后续便签接口依赖此值
+// 3. 加载业务数据（需 userId 就绪后才能调便签接口）
 const afterLogin = async (fallbackUser: User) => {
   // 优先用 getLoginUser 拉取真实用户信息；失败则回退到登录入参构造的 user
   let user: User = fallbackUser;
+  let userId: string | undefined;
   try {
     const resp = await authApi.getLoginUser();
     const obj = (resp || {}) as Record<string, unknown>;
@@ -259,6 +260,12 @@ const afterLogin = async (fallbackUser: User) => {
     const account =
       (typeof inner.account === 'string' && inner.account) ||
       fallbackUser.account;
+    // 提取用户 ID（便签接口所需，见 md/C端用户信息对接文档.md）
+    if (typeof inner.id === 'string' && inner.id) {
+      userId = inner.id;
+    } else if (typeof inner.id === 'number') {
+      userId = String(inner.id);
+    }
     // 仅账号登录
     user = { username, account, loginType: 'account' };
   } catch (e) {
@@ -271,6 +278,7 @@ const afterLogin = async (fallbackUser: User) => {
     username: user.username,
     account: user.account,
     loginType: user.loginType,
+    userId, // 便签接口依赖此字段
   });
   await loadUserData();
 };
@@ -283,15 +291,23 @@ const loadUserData = async () => {
     return;
   }
   try {
-    const [notesResp, cfgResp] = await Promise.all([
-      businessApi.getNotes(),
-      businessApi.getAiConfig(),
-    ]);
+    // 便签接口需先拿到 userId（登录时已存入 CLIENT_USER_INFO）
+    const userId = getUserId();
+    if (!userId) {
+      throw new ApiError(0, '未获取到用户 ID，无法加载便签');
+    }
+
+    const noteResult = await userNoteApi.getNote<{ notes?: Note[] } | Note[] | null>(userId);
 
     let remoteNotes: Note[] = [];
-    if (notesResp && typeof notesResp === 'object') {
-      const data = notesResp as { notes?: Note[] };
-      remoteNotes = Array.isArray(data.notes) ? data.notes : [];
+    const noteData = noteResult.data;
+    if (Array.isArray(noteData)) {
+      // data 直接是便签数组
+      remoteNotes = noteData;
+    } else if (noteData && typeof noteData === 'object') {
+      // data 是 { notes: Note[] } 结构
+      const wrapped = noteData as { notes?: Note[] };
+      remoteNotes = Array.isArray(wrapped.notes) ? wrapped.notes : [];
     }
     remoteNotes = remoteNotes.map((n, i) => ensureNoteShape(n, i));
 
@@ -305,7 +321,7 @@ const loadUserData = async () => {
             const normalized = localNotes.map((n: Note, i: number) =>
               ensureNoteShape(n, i),
             );
-            await businessApi.saveNotes(normalized);
+            await userNoteApi.saveNote({ notes: normalized }, userId);
             remoteNotes = normalized;
             localStorage.removeItem(LOCAL_NOTES_KEY);
             showToast('已同步本地便签到云端');
@@ -314,29 +330,8 @@ const loadUserData = async () => {
           // 忽略
         }
       }
-      const localCfg = localStorage.getItem(LOCAL_AI_CONFIG_KEY);
-      if (localCfg) {
-        try {
-          const parsed = JSON.parse(localCfg);
-          if (parsed && typeof parsed.summaryEnabled === 'boolean') {
-            await businessApi.saveAiConfig(parsed);
-            Object.assign(aiConfig, parsed);
-            localStorage.removeItem(LOCAL_AI_CONFIG_KEY);
-          }
-        } catch (e) {
-          // 忽略
-        }
-      }
     } else {
-      // 服务器有数据
-      if (cfgResp && typeof cfgResp === 'object') {
-        const data = cfgResp as { summaryEnabled?: boolean };
-        if (typeof data.summaryEnabled === 'boolean') {
-          Object.assign(aiConfig, data);
-        }
-      }
       localStorage.removeItem(LOCAL_NOTES_KEY);
-      localStorage.removeItem(LOCAL_AI_CONFIG_KEY);
     }
 
     notes.value = remoteNotes;
@@ -400,14 +395,21 @@ const handleAuthSubmit = async (params: {
       validCodeReqNo: params.validCodeReqNo,
     });
 
-    // 解析 token：兼容 { token } / { data: { token } } / { result: { token } }
-    const obj = (resp || {}) as Record<string, unknown>;
-    const inner = (obj.data || obj.result || obj) as Record<string, unknown>;
-    const token =
-      (typeof obj.token === 'string' && obj.token) ||
-      (typeof inner.token === 'string' && inner.token) ||
-      (typeof inner.accessToken === 'string' && inner.accessToken) ||
-      '';
+    // doRequest 已剥离统一结构，resp 即为 data
+    // 登录成功 data 直接就是 token 字符串，兼容个别返回对象的场景
+    let token = '';
+    if (typeof resp === 'string' && resp) {
+      token = resp;
+    } else if (resp && typeof resp === 'object') {
+      const obj = resp as Record<string, unknown>;
+      const inner = (obj.data || obj) as Record<string, unknown>;
+      token =
+        (typeof obj.token === 'string' && obj.token) ||
+        (typeof obj.accessToken === 'string' && obj.accessToken) ||
+        (typeof inner.token === 'string' && inner.token) ||
+        (typeof inner.accessToken === 'string' && inner.accessToken) ||
+        '';
+    }
     if (!token) {
       throw new ApiError(0, '登录成功但未返回 token，请联系后端确认');
     }
@@ -428,6 +430,9 @@ const handleAuthSubmit = async (params: {
     settingsModalRef.value?.setError(msg);
     // 文档第一章：登录失败且验证码开启 → 主动刷新图形验证码
     settingsModalRef.value?.refreshCaptchaIfOpen();
+  } finally {
+    // 请求结束，解除按钮禁用
+    settingsModalRef.value?.setLoading(false);
   }
 };
 
@@ -571,12 +576,8 @@ const triggerAISummary = async (
   force = false,
 ) => {
   if (!textContent.trim()) return;
-  // 未登录 或 业务 baseURL 未配置：AI 总结不可用
-  if (!canSyncBusiness()) {
-    aiStatusText.value = 'AI 总结需配置业务接口';
-    aiDotColor.value = '#ff3b30';
-    return;
-  }
+  // /public/ai/chat 免登录（对接文档硬约束 3：/public/** 全部免登录）
+  // AI 总结不再要求登录态
   if (aiSummaryInProgress.value) return;
   if (!force && !aiConfig.summaryEnabled) return;
   if (!force && manuallyTitledNotes[noteId]) return;
@@ -594,14 +595,24 @@ const triggerAISummary = async (
   isTitleShimmering.value = true;
 
   try {
-    const data = (await businessApi.summarize(textContent)) as {
-      title?: string;
-      error?: string;
-    };
-    if (data && data.title) {
+    // 调用 /public/ai/chat（对接文档：md/AI大模型对接文档.md）
+    // 不传 model 走后端默认模型；同步接口，超时 300s
+    const systemPrompt =
+      '你是一个笔记标题生成助手。请根据用户提供的笔记内容，生成一个简洁、准确的标题。' +
+      '要求：1. 不超过 20 个字；2. 不要使用引号、书名号等标点；3. 只输出标题本身，不要任何解释或前缀。';
+    const ollamaResp = await aiApi.chat({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: textContent },
+      ],
+      options: { temperature: 0.3, num_predict: 64 },
+    });
+    const title = (ollamaResp.message?.content || '').trim();
+
+    if (title) {
       const targetNote = notes.value.find((n) => n.id === noteId);
       if (targetNote && currentNoteId.value === noteId) {
-        targetNote.title = data.title;
+        targetNote.title = title;
         targetNote.updatedAt = Date.now();
         saveNotes();
         if (
@@ -612,17 +623,14 @@ const triggerAISummary = async (
         }
       }
       lastSubmittedContent[noteId] = textContent.trim().length;
-    }
-
-    if (data && data.error) {
-      aiStatusText.value = 'AI 服务开小差了';
-      aiDotColor.value = '#ff3b30';
-    } else {
       aiStatusText.value = 'AI 标题更新成功';
       aiDotColor.value = '#34c759';
       setTimeout(() => {
         if (aiStatusText.value === 'AI 标题更新成功') updateAIStatusDisplay();
       }, 3000);
+    } else {
+      aiStatusText.value = 'AI 未返回有效标题';
+      aiDotColor.value = '#ff3b30';
     }
   } catch (error) {
     const msg = error instanceof ApiError ? error.message : '网络或服务异常';
@@ -638,13 +646,7 @@ const triggerAISummary = async (
 
 const handleManualAiSummary = () => {
   if (!currentNote.value) return;
-  if (!canSyncBusiness()) {
-    showCustomAlert(
-      '需要配置业务接口',
-      'AI 总结功能需要在「设置」中配置业务接口地址并登录后使用',
-    );
-    return;
-  }
+  // /public/ai/chat 免登录，AI 总结不再要求登录态
   if (aiSummaryInProgress.value) {
     showToast('AI 总结进行中，请稍候');
     return;
@@ -755,6 +757,7 @@ const tryRestoreSession = async () => {
     loginType: 'account',
     account: userInfo.account as string,
   };
+  // userId 已在 afterLogin 时存入 CLIENT_USER_INFO，loadUserData 会读取
   await loadUserData();
 };
 
@@ -891,7 +894,6 @@ watch(currentNoteId, (newId) => {
       @titleInput="onTitleInput"
       @manualAiSummary="handleManualAiSummary"
       @openSettings="isSettingsOpen = true"
-      @openImageTools="isImageToolsOpen = true"
       @copyNote="copyCurrentNote"
       @deleteNote="deleteCurrentNote"
       @aiEditorReady="handleAiEditorReady"
@@ -927,7 +929,5 @@ watch(currentNoteId, (newId) => {
       @submitAuth="handleAuthSubmit"
       @logout="logout"
     />
-
-    <ImageTools :show="isImageToolsOpen" @close="isImageToolsOpen = false" />
   </div>
 </template>

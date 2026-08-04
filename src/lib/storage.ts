@@ -49,8 +49,23 @@ export interface StoredUser {
   username?: string;
   phone?: string;
   email?: string;
+  // 后端用户 ID（对接文档"便签保存和获取"接口所需 userId）
+  userId?: string;
+  id?: string;
   [key: string]: unknown;
 }
+
+// 便签接口所需 userId：优先 userId，其次 id，最后 account
+export const getUserId = (): string | null => {
+  const u = getUserInfo();
+  if (!u) return null;
+  return (
+    (typeof u.userId === 'string' && u.userId) ||
+    (typeof u.id === 'string' && u.id) ||
+    (typeof u.account === 'string' && u.account) ||
+    null
+  );
+};
 
 export const getUserInfo = (): StoredUser | null => {
   const raw = safeGet(CLIENT_USER_INFO);

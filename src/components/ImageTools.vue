@@ -238,7 +238,7 @@ watch(
       @click.stop
     >
       <!-- 头部 -->
-      <div class="px-6 pt-6 pb-4 flex justify-between items-center border-b border-black/[0.06] shrink-0">
+      <div class="px-6 pb-4 flex justify-between items-center border-b border-black/[0.06] shrink-0">
         <h3 class="text-lg font-semibold text-[#1d1d1f] flex items-center gap-2">
           <picture theme="outline" size="20" :stroke-width="3" class="text-[#0071e3]" />
           图片处理

@@ -12,7 +12,6 @@ import {
 } from '@icon-park/vue-next';
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { ApiError, authApi } from '../lib/api';
-import { getCaptchaOpen } from '../lib/storage';
 import type { User as UserType } from '../types/note';
 
 const props = defineProps<{
@@ -49,14 +48,20 @@ const validCode = ref(''); // 图形验证码
 const validCodeReqNo = ref(''); // 验证码请求号（来自后端返回）
 const rememberMe = ref(false);
 const captchaImage = ref(''); // 图形验证码 base64
-const captchaOpen = ref(getCaptchaOpen()); // 是否启用图形验证码（来自系统配置）
+// 验证码始终启用（后端登录/注册均要求）
+const captchaOpen = ref(true);
 const authError = ref('');
 const authLoading = ref(false);
 
-// ========== 校验 ==========
-// 账号至少 1 位；密码至少 6 位
-const isAccountValid = computed(() => account.value.trim().length > 0);
-const isPasswordValid = computed(() => password.value.length >= 6);
+// ========== 校验（对接文档第八章） ==========
+// 账号：3-20 位，不含中文
+const ACCOUNT_RE = /^[^\u4e00-\u9fa5]{3,20}$/;
+// 密码：6-20 位（前端只做长度初判，复杂度最终以服务端为准）
+const isAccountValid = computed(() => ACCOUNT_RE.test(account.value.trim()));
+const isPasswordValid = computed(() => {
+  const len = password.value.length;
+  return len >= 6 && len <= 20;
+});
 const isConfirmValid = computed(() =>
   mode.value === 'register'
     ? confirmPassword.value === password.value && confirmPassword.value.length >= 6
@@ -99,16 +104,12 @@ watch(mode, () => {
   }
 });
 
-// 打开时同步验证码开关并按需加载图形验证码
+// 打开时加载图形验证码
 watch(
   () => props.show,
   (v) => {
-    if (v) {
-      captchaOpen.value = getCaptchaOpen();
-      // 文档第一章：验证码开关开启时，账号登录需展示图形验证码
-      if (captchaOpen.value && !captchaImage.value) {
-        loadPicCaptcha();
-      }
+    if (v && !captchaImage.value) {
+      loadPicCaptcha();
     }
   },
 );
@@ -116,16 +117,19 @@ watch(
 // ========== 图形验证码 ==========
 const loadPicCaptcha = async () => {
   try {
+    // 对接文档第四章：返回 { validCodeBase64, validCodeReqNo }
     const data = (await authApi.getPicCaptcha()) as {
+      validCodeBase64?: string;
       validCodeReqNo?: string;
+      // 兼容历史字段
       captcha?: string;
-      // 也兼容直接字段
-      reqNo?: string;
       img?: string;
       image?: string;
+      reqNo?: string;
     };
     validCodeReqNo.value = data?.validCodeReqNo || data?.reqNo || '';
-    captchaImage.value = data?.captcha || data?.img || data?.image || '';
+    captchaImage.value =
+      data?.validCodeBase64 || data?.captcha || data?.img || data?.image || '';
   } catch (e) {
     const msg = e instanceof ApiError ? e.message : '获取图形验证码失败';
     authError.value = msg;
@@ -133,38 +137,37 @@ const loadPicCaptcha = async () => {
 };
 
 // ========== 提交登录 / 注册 ==========
-const onSubmit = async () => {
+const onSubmit = () => {
   if (!canSubmit.value) return;
   if (mode.value === 'register' && confirmPassword.value !== password.value) {
     authError.value = '两次输入的密码不一致';
     return;
   }
   authError.value = '';
+  // 提交期间禁用按钮，由父组件请求结束后调 setLoading(false) 复位
   authLoading.value = true;
-  try {
-    emit('submitAuth', {
-      mode: mode.value,
-      account: account.value.trim(),
-      password: password.value,
-      validCode: validCode.value || undefined,
-      validCodeReqNo: validCodeReqNo.value || undefined,
-      rememberAccount: rememberMe.value,
-    });
-  } catch (e) {
-    const msg = e instanceof ApiError ? e.message : mode.value === 'register' ? '注册失败' : '登录失败';
-    authError.value = msg;
-  } finally {
-    authLoading.value = false;
-  }
+  emit('submitAuth', {
+    mode: mode.value,
+    account: account.value.trim(),
+    password: password.value,
+    validCode: validCode.value || undefined,
+    validCodeReqNo: validCodeReqNo.value || undefined,
+    rememberAccount: rememberMe.value,
+  });
 };
 
 // 切换到注册
 const switchToRegister = () => {
   mode.value = 'register';
 };
-// 切换到登录
+// 切换到登录（保留账号回填，清空密码/验证码）
 const switchToLogin = () => {
   mode.value = 'login';
+  password.value = '';
+  confirmPassword.value = '';
+  validCode.value = '';
+  validCodeReqNo.value = '';
+  authError.value = '';
 };
 
 // 接收父组件透传的登录错误
@@ -173,12 +176,13 @@ defineExpose({
   setError: (msg: string) => {
     authError.value = msg;
   },
+  setLoading: (v: boolean) => {
+    authLoading.value = v;
+  },
+  switchToLogin,
   refreshCaptchaIfOpen: () => {
-    captchaOpen.value = getCaptchaOpen();
-    if (captchaOpen.value) {
-      validCode.value = '';
-      loadPicCaptcha();
-    }
+    validCode.value = '';
+    loadPicCaptcha();
   },
 });
 
@@ -193,14 +197,13 @@ onUnmounted(() => {
     :class="
       show ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
     "
-    @click="emit('close')"
   >
     <div
       class="bg-white/95 backdrop-blur-[20px] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.12)] w-[440px] max-h-[88vh] overflow-hidden flex flex-col"
       @click.stop
     >
       <div
-        class="px-6 pt-6 pb-4 flex justify-between items-center border-b border-black/[0.06] shrink-0"
+        class="px-6 flex justify-between items-center border-b border-black/[0.06] shrink-0"
       >
         <h3
           class="text-lg font-semibold text-[#1d1d1f] flex items-center gap-2"
@@ -221,7 +224,7 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <div class="px-6 py-5 space-y-5 overflow-y-auto">
+      <div class="px-6 pb-5 space-y-5 overflow-y-auto">
         <!-- 账户区域 -->
         <div v-if="!isLoggedIn">
           <div class="flex items-center gap-2 mb-3">
@@ -275,7 +278,7 @@ onUnmounted(() => {
               <input
                 v-model="account"
                 type="text"
-                placeholder="请输入账号"
+                placeholder="账号（3-20 位，不含中文）"
                 autocomplete="username"
                 class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-3 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
               />
@@ -292,7 +295,7 @@ onUnmounted(() => {
               <input
                 v-model="password"
                 :type="showPassword ? 'text' : 'password'"
-                placeholder="密码（至少 6 位）"
+                placeholder="密码（6-20 位）"
                 :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
                 class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-10 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
               />
@@ -421,7 +424,7 @@ onUnmounted(() => {
           <p class="text-[14px] text-[#86868b] mt-3 text-center">
             {{
               mode === 'register'
-                ? '注册成功后将自动登录'
+                ? '注册成功后请返回登录'
                 : '登录后，本地便签将自动同步到云端'
             }}
           </p>
