@@ -1,11 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, onUnmounted } from 'vue';
-import {
-  Copy,
-  Delete,
-  Magic,
-  Setting as SettingIcon,
-} from '@icon-park/vue-next';
+import { Copy, Delete, Magic } from '@icon-park/vue-next';
 import { AiEditor } from 'aieditor';
 import 'aieditor/dist/style.css';
 import { fileApi } from '../lib/api';
@@ -28,7 +23,6 @@ const emit = defineEmits([
   'update:currentTitle',
   'titleInput',
   'manualAiSummary',
-  'openSettings',
   'copyNote',
   'deleteNote',
   'aiEditorReady',
@@ -89,7 +83,18 @@ const convertToWebp = async (file: File, quality = 0.85): Promise<File> => {
 
 let aiEditor: AiEditor | null = null;
 
-// 自定义图片上传：调用 /client/c/fileFolder/upload（对接文档：md/C端文件上传对接文档.md）
+// 未登录时把图片转成 base64 data URL，直接嵌入笔记 body（随文本一起存 localStorage）
+const fileToDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('图片读取失败'));
+    reader.readAsDataURL(file);
+  });
+
+// 自定义图片上传：
+//   - 已登录：调用 /client/c/fileFolder/upload（对接文档：md/C端文件上传对接文档.md），返回云端 URL
+//   - 未登录：转 base64 data URL 嵌入笔记（随文本一起存 localStorage）
 // AiEditor 要求 uploader 返回 { errorCode: 0, data: { src, alt, ... } }
 const imageUploader = async (
   file: File,
@@ -106,10 +111,23 @@ const imageUploader = async (
     throw new Error(sizeErr);
   }
 
-  // 先转 webp 压缩再上传（减少带宽）
+  // 先转 webp 压缩（减少本地存储 / 上传带宽）
   const webpFile = await convertToWebp(file);
+
+  // 未登录：base64 内嵌，避免调用需登录态的云端接口
+  if (!props.cloudMode) {
+    const dataUrl = await fileToDataUrl(webpFile);
+    return {
+      errorCode: 0,
+      data: {
+        src: dataUrl,
+        alt: webpFile.name,
+      },
+    };
+  }
+
+  // 已登录：上传到云端
   const result = await fileApi.upload(webpFile);
-  // AiEditor 期望的返回格式
   return {
     errorCode: 0,
     data: {
@@ -122,7 +140,7 @@ const imageUploader = async (
 onMounted(async () => {
   aiEditor = new AiEditor({
     element: '#editor-container',
-    placeholder: '键入富文本内容，失焦后 AI 将自动总结标题...',
+    placeholder: '键入富文本内容，可点击右上「AI 标题」生成标题...',
     content: '',
     image: {
       // 自定义 uploader，直接调用新接口，不使用 uploadUrl
@@ -157,36 +175,32 @@ onUnmounted(() => {
       class="absolute top-4 right-4 z-10 bg-[rgba(255,255,255,0.75)]"
     >
       <div class="flex justify-end gap-3 items-center">
-        <button
-          class="bg-gradient-to-r from-[#e0e7ff] to-[#ede9fe] border border-[#c7d2fe]/60 px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#6366f1] transition shadow-[0_1px_3px_rgba(99,102,241,0.08)] hover:shadow-[0_2px_8px_rgba(99,102,241,0.15)]"
-          :class="{ 'ai-btn-loading': aiSummaryInProgress }"
-          @click="emit('manualAiSummary')"
-          title="AI 总结标题"
-        >
-          <magic theme="outline" size="15" :stroke-width="3" class="ai-icon" />
-          AI 总结
-        </button>
-        <button
-          class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-white"
-          @click="emit('openSettings')"
-          title="设置"
-        >
-          <setting-icon theme="outline" size="15" :stroke-width="3" />
-        </button>
-        <button
-          class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-white"
-          @click="emit('copyNote')"
-          title="复制纯文本"
-        >
-          <copy theme="outline" size="15" :stroke-width="3" />
-        </button>
-        <button
-          class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-[#ff3b30] hover:text-white"
-          @click="emit('deleteNote')"
-          title="删除便签"
-        >
-          <delete theme="outline" size="15" :stroke-width="3" />
-        </button>
+        <a-tooltip title="AI 生成标题" placement="bottom">
+          <button
+            class="bg-gradient-to-r from-[#e0e7ff] to-[#ede9fe] border border-[#c7d2fe]/60 px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#6366f1] transition shadow-[0_1px_3px_rgba(99,102,241,0.08)] hover:shadow-[0_2px_8px_rgba(99,102,241,0.15)]"
+            :class="{ 'ai-btn-loading': aiSummaryInProgress }"
+            @click="emit('manualAiSummary')"
+          >
+            <magic theme="outline" size="15" :stroke-width="3" class="ai-icon" />
+            AI 标题
+          </button>
+        </a-tooltip>
+        <a-tooltip title="复制纯文本" placement="bottom">
+          <button
+            class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-white"
+            @click="emit('copyNote')"
+          >
+            <copy theme="outline" size="15" :stroke-width="3" />
+          </button>
+        </a-tooltip>
+        <a-tooltip title="删除便签" placement="bottom">
+          <button
+            class="bg-white/80 border border-black/[0.06] px-[18px] py-[9px] rounded-xl text-sm font-medium cursor-pointer inline-flex items-center gap-1.5 text-[#1d1d1f] transition shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:bg-[#ff3b30] hover:text-white"
+            @click="emit('deleteNote')"
+          >
+            <delete theme="outline" size="15" :stroke-width="3" />
+          </button>
+        </a-tooltip>
       </div>
     </div>
 
@@ -242,7 +256,7 @@ onUnmounted(() => {
       />
       <p class="text-[14px] mt-1">未选择便签</p>
       <p class="text-[12px] text-[#c7c7cc]">
-        点击右上角 + 新建，或在设置中登录开启云同步
+        点击右上角 + 新建，或点击左侧头像登录开启云同步
       </p>
     </div>
   </div>

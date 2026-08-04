@@ -5,7 +5,6 @@ import {
   Logout,
   Pushpin,
   Search,
-  Setting,
 } from '@icon-park/vue-next';
 import { computed } from 'vue';
 import type { Note, User as UserType } from '../types/note';
@@ -62,9 +61,14 @@ const getPlainSnippet = (htmlBody: string) => {
   <div
     class="w-80 h-full bg-[rgba(255,255,255,0.5)] border-r border-black/[0.06] flex flex-col backdrop-blur-[20px]"
   >
-    <!-- 用户信息条 / 登录入口 -->
+    <!-- 用户信息条 / 登录入口：点击头像/Logo 打开设置 -->
     <div class="px-4 pt-4 pb-2 flex items-center justify-between">
-      <div class="flex items-center gap-2 min-w-0 flex-1">
+      <button
+        type="button"
+        class="flex items-center gap-2 min-w-0 flex-1 bg-transparent border-none p-0 cursor-pointer rounded-lg hover:bg-black/[0.03] transition -mx-1 px-1"
+        @click="emit('openSettings')"
+        :title="isLoggedIn ? '点击打开设置' : '点击登录'"
+      >
         <template v-if="isLoggedIn">
           <div
             class="w-8 h-8 rounded-full bg-[#0071e3]/10 text-[#0071e3] flex items-center justify-center text-[14px] font-semibold shrink-0"
@@ -83,23 +87,16 @@ const getPlainSnippet = (htmlBody: string) => {
           />
           <span class="text-[14px] text-[#86868b]">未登录 · 本地模式</span>
         </template>
-      </div>
+      </button>
       <div class="flex items-center gap-1">
-        <button
-          @click="emit('openSettings')"
-          title="设置"
-          class="text-[#86868b] hover:text-[#0071e3] w-8 h-8 rounded-full flex items-center justify-center hover:bg-[#0071e3]/10 transition"
-        >
-          <setting theme="outline" size="16" :stroke-width="3" />
-        </button>
-        <button
-          v-if="isLoggedIn"
-          @click="emit('logout')"
-          title="退出登录"
-          class="text-[#86868b] hover:text-[#ff3b30] w-8 h-8 rounded-full flex items-center justify-center hover:bg-[#ff3b30]/10 transition"
-        >
-          <logout theme="outline" size="16" :stroke-width="3" />
-        </button>
+        <a-tooltip v-if="isLoggedIn" title="退出登录" placement="bottom">
+          <button
+            @click="emit('logout')"
+            class="text-[#86868b] hover:text-[#ff3b30] w-8 h-8 rounded-full flex items-center justify-center hover:bg-[#ff3b30]/10 transition"
+          >
+            <logout theme="outline" size="16" :stroke-width="3" />
+          </button>
+        </a-tooltip>
       </div>
     </div>
 
@@ -125,13 +122,14 @@ const getPlainSnippet = (htmlBody: string) => {
           class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-3 py-[7px] text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
         />
       </div>
-      <button
-        class="shrink-0 relative z-2 bg-transparent border-none cursor-pointer w-9 h-9 rounded-full flex items-center justify-center text-[#0071e3] transition hover:bg-[#0071e3]/10"
-        @click="emit('createNote')"
-        title="新建便签"
-      >
-        <add theme="outline" size="22" :stroke-width="3" />
-      </button>
+      <a-tooltip title="新建便签" placement="bottom">
+        <button
+          class="shrink-0 relative z-2 bg-transparent border-none cursor-pointer w-9 h-9 rounded-full flex items-center justify-center text-[#0071e3] transition hover:bg-[#0071e3]/10"
+          @click="emit('createNote')"
+        >
+          <add theme="outline" size="22" :stroke-width="3" />
+        </button>
+      </a-tooltip>
     </div>
 
     <!-- 颜色筛选条 -->
@@ -223,50 +221,53 @@ const getPlainSnippet = (htmlBody: string) => {
         </div>
 
         <div class="flex items-center gap-0.5">
-          <button
-            class="bg-transparent border-none cursor-pointer w-7 h-7 rounded-full flex items-center justify-center transition hover:bg-black/5"
-            :class="
-              note.id === currentNoteId
-                ? 'opacity-70 hover:opacity-100'
-                : 'opacity-0 group-hover:opacity-100'
-            "
-            title="颜色分类"
-            @click.stop="emit('toggleColorPopover', $event, note.id)"
-          >
-            <span
-              class="inline-block w-3.5 h-3.5 rounded-full border border-black/10"
-              :style="{ background: getNoteColorHex(note) }"
-            ></span>
-          </button>
-          <button
-            class="bg-transparent border-none text-[#86868b] cursor-pointer w-7 h-7 rounded-full flex items-center justify-center transition hover:bg-[#ff9500]/10 hover:text-[#ff9500]"
-            :class="
-              note.id === currentNoteId
-                ? 'opacity-70 hover:opacity-100'
-                : 'opacity-0 group-hover:opacity-100'
-            "
-            :title="note.pinned ? '取消置顶' : '置顶'"
-            @click.stop="emit('togglePin', note.id)"
-          >
-            <pushpin
-              :theme="note.pinned ? 'filled' : 'outline'"
-              size="14"
-              :stroke-width="3"
-            />
-          </button>
+          <a-tooltip title="颜色分类" placement="top">
+            <button
+              class="bg-transparent border-none cursor-pointer w-7 h-7 rounded-full flex items-center justify-center transition hover:bg-black/5"
+              :class="
+                note.id === currentNoteId
+                  ? 'opacity-70 hover:opacity-100'
+                  : 'opacity-0 group-hover:opacity-100'
+              "
+              @click.stop="emit('toggleColorPopover', $event, note.id)"
+            >
+              <span
+                class="inline-block w-3.5 h-3.5 rounded-full border border-black/10"
+                :style="{ background: getNoteColorHex(note) }"
+              ></span>
+            </button>
+          </a-tooltip>
+          <a-tooltip :title="note.pinned ? '取消置顶' : '置顶'" placement="top">
+            <button
+              class="bg-transparent border-none text-[#86868b] cursor-pointer w-7 h-7 rounded-full flex items-center justify-center transition hover:bg-[#ff9500]/10 hover:text-[#ff9500]"
+              :class="
+                note.id === currentNoteId
+                  ? 'opacity-70 hover:opacity-100'
+                  : 'opacity-0 group-hover:opacity-100'
+              "
+              @click.stop="emit('togglePin', note.id)"
+            >
+              <pushpin
+                :theme="note.pinned ? 'filled' : 'outline'"
+                size="14"
+                :stroke-width="3"
+              />
+            </button>
+          </a-tooltip>
         </div>
-        <button
-          class="absolute top-1 right-1 bg-transparent border-none text-[#86868b] cursor-pointer w-5 h-5 rounded-full flex items-center justify-center transition hover:bg-[#ff3b30]/10 hover:text-[#ff3b30]"
-          :class="
-            note.id === currentNoteId
-              ? 'opacity-50 hover:opacity-100'
-              : 'opacity-0 group-hover:opacity-100'
-          "
-          title="删除便签"
-          @click.stop="emit('deleteNote', note.id)"
-        >
-          <close theme="outline" size="12" :stroke-width="4" />
-        </button>
+        <a-tooltip title="删除便签" placement="top">
+          <button
+            class="absolute top-1 right-1 bg-transparent border-none text-[#86868b] cursor-pointer w-5 h-5 rounded-full flex items-center justify-center transition hover:bg-[#ff3b30]/10 hover:text-[#ff3b30]"
+            :class="
+              note.id === currentNoteId
+                ? 'opacity-50 hover:opacity-100'
+                : 'opacity-0 group-hover:opacity-100'
+            "
+            @click.stop="emit('deleteNote', note.id)"
+          >
+            <close theme="outline" size="12" :stroke-width="4" />
+          </button>
+        </a-tooltip>
       </div>
     </div>
   </div>

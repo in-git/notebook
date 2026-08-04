@@ -6,7 +6,7 @@ import EditorWorkspace from './components/EditorWorkspace.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import Sidebar from './components/Sidebar.vue';
 import Toast from './components/Toast.vue';
-import { ApiError, aiApi, authApi, businessApi, userNoteApi } from './lib/api';
+import { ApiError, aiApi, authApi, userNoteApi } from './lib/api';
 import { sm2Encrypt } from './lib/sm2';
 import {
   clearAuth,
@@ -14,13 +14,12 @@ import {
   getToken,
   getUserId,
   getUserInfo,
-  LOCAL_AI_CONFIG_KEY,
   LOCAL_NOTES_KEY,
   setRememberedAccount as persistRememberedAccount,
   setToken,
   setUserInfo,
 } from './lib/storage';
-import type { AiConfig, Note, User } from './types/note';
+import type { Note, User } from './types/note';
 
 const notes = ref<Note[]>([]);
 const currentNoteId = ref<number | null>(null);
@@ -32,12 +31,11 @@ const wordCount = ref(0);
 const isSettingsOpen = ref(false);
 const settingsModalRef = ref<InstanceType<typeof SettingsModal> | null>(null);
 const isAiLoading = ref(false);
-const aiStatusText = ref('AI 总结已关闭');
+const aiStatusText = ref('AI 标题已就绪');
 const aiDotColor = ref('#86868b');
 const isTitleShimmering = ref(false);
-const aiSummaryInProgress = ref(false);
+const aiTitleInProgress = ref(false);
 
-const aiConfig = reactive<AiConfig>({ summaryEnabled: false });
 const toast = reactive({ show: false, message: '已复制纯文本到剪贴板' });
 const customAlert = reactive({ show: false, title: '', message: '' });
 const colorPopover = reactive({
@@ -51,9 +49,6 @@ const currentUser = ref<User | null>(null);
 
 let aiEditorInstance: any = null;
 let isInternalUpdate = false;
-const aiThrottleMap: Record<number, number> = {};
-const lastSubmittedContent: Record<number, number> = {};
-const manuallyTitledNotes: Record<number, boolean> = {};
 
 // 已登录即视为「云端模式」（业务后端固定为本地 http://localhost:82）
 const isCloudMode = computed(() => !!currentUser.value);
@@ -150,31 +145,6 @@ const flushNotesBeacon = () => {
 
 window.addEventListener('beforeunload', flushNotesBeacon);
 
-const saveAiConfig = () => {
-  updateAIStatusDisplay();
-  if (!canSyncBusiness()) {
-    try {
-      localStorage.setItem(LOCAL_AI_CONFIG_KEY, JSON.stringify(aiConfig));
-    } catch (e) {
-      // 忽略
-    }
-    return;
-  }
-  businessApi
-    .saveAiConfig(aiConfig)
-    .catch((e) => console.error('AI 配置保存失败:', e));
-};
-
-const updateAIStatusDisplay = () => {
-  if (aiConfig.summaryEnabled) {
-    aiStatusText.value = 'AI 就绪';
-    aiDotColor.value = '#34c759';
-  } else {
-    aiStatusText.value = 'AI 总结已关闭';
-    aiDotColor.value = '#86868b';
-  }
-};
-
 const showToast = (msg: string) => {
   toast.message = msg || '已复制纯文本到剪贴板';
   toast.show = true;
@@ -206,18 +176,6 @@ const loadLocalData = () => {
   } catch (e) {
     console.error('读取本地笔记失败:', e);
   }
-  try {
-    const rawCfg = localStorage.getItem(LOCAL_AI_CONFIG_KEY);
-    if (rawCfg) {
-      const parsed = JSON.parse(rawCfg);
-      if (parsed && typeof parsed.summaryEnabled === 'boolean') {
-        Object.assign(aiConfig, parsed);
-      }
-    }
-  } catch (e) {
-    // 忽略
-  }
-  updateAIStatusDisplay();
   if (notes.value.length > 0 && currentNoteId.value === null) {
     currentNoteId.value = notes.value[0].id;
   }
@@ -339,7 +297,6 @@ const loadUserData = async () => {
     if (currentNote.value) {
       currentTitle.value = currentNote.value.title || '';
     }
-    updateAIStatusDisplay();
   } catch (e) {
     const msg =
       e instanceof ApiError ? e.message : '网络异常，无法加载云端数据';
@@ -466,12 +423,6 @@ const logout = async () => {
 };
 
 const selectNote = (id: number) => {
-  if (currentNoteId.value && currentNoteId.value !== id) {
-    const prevNote = notes.value.find((n) => n.id === currentNoteId.value);
-    if (prevNote) {
-      triggerAISummary(currentNoteId.value, getPlainSnippet(prevNote.body));
-    }
-  }
   currentNoteId.value = id;
 };
 
@@ -504,7 +455,6 @@ const onTitleInput = () => {
   if (!currentNote.value) return;
   currentNote.value.title = currentTitle.value;
   currentNote.value.updatedAt = Date.now();
-  manuallyTitledNotes[currentNote.value.id] = true;
   saveNotes();
 };
 
@@ -570,33 +520,18 @@ const setNoteColor = (id: number, color: string | null) => {
   colorPopover.show = false;
 };
 
-const triggerAISummary = async (
-  noteId: number,
-  textContent: string,
-  force = false,
-) => {
+// 手动触发：点击「AI 标题」按钮调用
+const triggerAiTitle = async (noteId: number, textContent: string) => {
   if (!textContent.trim()) return;
-  // /public/ai/chat 免登录（对接文档硬约束 3：/public/** 全部免登录）
-  // AI 总结不再要求登录态
-  if (aiSummaryInProgress.value) return;
-  if (!force && !aiConfig.summaryEnabled) return;
-  if (!force && manuallyTitledNotes[noteId]) return;
-  if (!force && lastSubmittedContent[noteId] === textContent.trim().length)
-    return;
+  if (aiTitleInProgress.value) return;
 
-  const now = Date.now();
-  if (!force && now - (aiThrottleMap[noteId] || 0) < 15000) return;
-
-  aiThrottleMap[noteId] = now;
-  aiSummaryInProgress.value = true;
+  aiTitleInProgress.value = true;
   isAiLoading.value = true;
-  aiStatusText.value = 'AI 正在总结标题...';
+  aiStatusText.value = 'AI 正在生成标题...';
   aiDotColor.value = '#0071e3';
   isTitleShimmering.value = true;
 
   try {
-    // 调用 /public/ai/chat（对接文档：md/AI大模型对接文档.md）
-    // 不传 model 走后端默认模型；同步接口，超时 300s
     const systemPrompt =
       '你是一个笔记标题生成助手。请根据用户提供的笔记内容，生成一个简洁、准确的标题。' +
       '要求：1. 不超过 20 个字；2. 不要使用引号、书名号等标点；3. 只输出标题本身，不要任何解释或前缀。';
@@ -622,11 +557,13 @@ const triggerAISummary = async (
           currentTitle.value = targetNote.title;
         }
       }
-      lastSubmittedContent[noteId] = textContent.trim().length;
       aiStatusText.value = 'AI 标题更新成功';
       aiDotColor.value = '#34c759';
       setTimeout(() => {
-        if (aiStatusText.value === 'AI 标题更新成功') updateAIStatusDisplay();
+        if (aiStatusText.value === 'AI 标题更新成功') {
+          aiStatusText.value = 'AI 标题已就绪';
+          aiDotColor.value = '#86868b';
+        }
       }, 3000);
     } else {
       aiStatusText.value = 'AI 未返回有效标题';
@@ -636,24 +573,23 @@ const triggerAISummary = async (
     const msg = error instanceof ApiError ? error.message : '网络或服务异常';
     aiStatusText.value = 'AI 服务开小差了';
     aiDotColor.value = '#ff3b30';
-    showCustomAlert('AI 总结失败', msg);
+    showCustomAlert('AI 标题生成失败', msg);
   } finally {
-    aiSummaryInProgress.value = false;
+    aiTitleInProgress.value = false;
     isAiLoading.value = false;
     isTitleShimmering.value = false;
   }
 };
 
-const handleManualAiSummary = () => {
+const handleManualAiTitle = () => {
   if (!currentNote.value) return;
-  // /public/ai/chat 免登录，AI 总结不再要求登录态
-  if (aiSummaryInProgress.value) {
-    showToast('AI 总结进行中，请稍候');
+  if (aiTitleInProgress.value) {
+    showToast('AI 标题生成中，请稍候');
     return;
   }
   const plainText = getPlainSnippet(currentNote.value.body);
   if (!plainText) {
-    showCustomAlert('无法总结', '便签内容为空，请先输入内容后再使用 AI 总结');
+    showCustomAlert('无法生成标题', '便签内容为空，请先输入内容后再使用 AI 标题');
     return;
   }
   if (plainText.length < 10) {
@@ -661,11 +597,11 @@ const handleManualAiSummary = () => {
       '内容太短',
       '当前仅 ' +
         plainText.length +
-        ' 个字，至少需要 10 个字才能生成有意义的总结',
+        ' 个字，至少需要 10 个字才能生成有意义的标题',
     );
     return;
   }
-  triggerAISummary(currentNote.value.id, plainText, true);
+  triggerAiTitle(currentNote.value.id, plainText);
 };
 
 // 拖拽排序逻辑
@@ -775,7 +711,6 @@ onMounted(async () => {
 
 let syncInterval: number | null = null;
 let lastSyncedContent = '';
-let lastEditorFocusTime = 0;
 
 const handleAiEditorReady = (editor: any) => {
   aiEditorInstance = editor;
@@ -784,39 +719,12 @@ const handleAiEditorReady = (editor: any) => {
   // onChange/onFocus/onBlur 回调注册。这里改为在下面的轮询中用
   // editor.isFocused() 做边沿检测来记录焦点时间。
 
-  // 使用定时器同步内容变化和检测失焦（AIEditor 没有类似 Quill 的事件）
+  // 使用定时器同步内容变化（AIEditor 没有类似 Quill 的事件）
   if (syncInterval) clearInterval(syncInterval);
-  let wasFocused = false;
   syncInterval = window.setInterval(() => {
     if (!aiEditorInstance || !currentNoteId.value) return;
 
     const currentContent = editor.getHtml();
-    const isFocused = document.hasFocus() && editor.isFocused();
-    const now = Date.now();
-
-    // 边沿检测：从未聚焦变为聚焦时记录焦点时间
-    if (isFocused && !wasFocused) {
-      lastEditorFocusTime = now;
-    }
-    wasFocused = isFocused;
-
-    // 检测失焦：超过 1 秒没有焦点且内容有变化
-    if (
-      !isFocused &&
-      lastSyncedContent &&
-      currentContent !== lastSyncedContent &&
-      now - lastEditorFocusTime > 1000
-    ) {
-      // 保存内容
-      const note = notes.value.find((n) => n.id === currentNoteId.value);
-      if (note) {
-        note.body = currentContent;
-        note.updatedAt = Date.now();
-        saveNotes();
-        // 触发 AI 总结
-        triggerAISummary(currentNoteId.value, getPlainSnippet(currentContent));
-      }
-    }
 
     // 同步内容变化
     if (!isInternalUpdate && currentContent !== lastSyncedContent) {
@@ -888,12 +796,11 @@ watch(currentNoteId, (newId) => {
       :aiStatusText="aiStatusText"
       :aiDotColor="aiDotColor"
       :isTitleShimmering="isTitleShimmering"
-      :aiSummaryInProgress="aiSummaryInProgress"
+      :aiSummaryInProgress="aiTitleInProgress"
       :currentUser="currentUser"
       :cloudMode="isCloudMode"
       @titleInput="onTitleInput"
-      @manualAiSummary="handleManualAiSummary"
-      @openSettings="isSettingsOpen = true"
+      @manualAiSummary="handleManualAiTitle"
       @copyNote="copyCurrentNote"
       @deleteNote="deleteCurrentNote"
       @aiEditorReady="handleAiEditorReady"
@@ -920,12 +827,10 @@ watch(currentNoteId, (newId) => {
     <SettingsModal
       ref="settingsModalRef"
       :show="isSettingsOpen"
-      v-model:summaryEnabled="aiConfig.summaryEnabled"
       :currentUser="currentUser"
       :cloudMode="isCloudMode"
       :rememberedAccount="getRememberedAccount()"
       @close="isSettingsOpen = false"
-      @saveConfig="saveAiConfig"
       @submitAuth="handleAuthSubmit"
       @logout="logout"
     />

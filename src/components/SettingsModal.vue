@@ -16,14 +16,12 @@ import type { User as UserType } from '../types/note';
 
 const props = defineProps<{
   show: boolean;
-  summaryEnabled: boolean;
   currentUser: UserType | null;
   cloudMode: boolean;
   rememberedAccount: string | null;
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:summaryEnabled', value: boolean): void;
   (e: 'close'): void;
   (e: 'saveConfig'): void;
   (e: 'submitAuth', params: {
@@ -474,45 +472,6 @@ onUnmounted(() => {
           <p class="text-[14px] text-[#86868b] mt-2 text-center">
             退出后将以本地模式继续使用，数据保留在本设备
           </p>
-        </div>
-
-        <!-- 分割线 -->
-        <div class="border-t border-black/[0.06]"></div>
-
-        <!-- AI 总结开关 -->
-        <div class="flex justify-between items-center">
-          <div class="flex-1 pr-4">
-            <div
-              class="text-[15px] font-medium text-[#1d1d1f] flex items-center gap-1.5"
-            >
-              AI 自动总结标题
-            </div>
-            <div class="text-[14px] text-[#86868b] mt-0.5">
-              失焦后自动调用 AI 为便签生成标题
-            </div>
-          </div>
-          <label
-            class="relative inline-block w-[51px] h-[31px] cursor-pointer shrink-0"
-          >
-            <input
-              type="checkbox"
-              :checked="summaryEnabled"
-              @change="
-                emit(
-                  'update:summaryEnabled',
-                  ($event.target as HTMLInputElement).checked,
-                );
-                emit('saveConfig');
-              "
-              class="sr-only peer"
-            />
-            <span
-              class="absolute inset-0 bg-[#e9e9ea] rounded-full transition-colors peer-checked:bg-[#34c759]"
-            ></span>
-            <span
-              class="absolute top-[2px] left-[2px] w-[27px] h-[27px] bg-white rounded-full shadow-[0_1px_3px_rgba(0,0,0,0.15)] transition-transform peer-checked:translate-x-[20px]"
-            ></span>
-          </label>
         </div>
       </div>
     </div>
