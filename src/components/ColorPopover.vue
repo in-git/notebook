@@ -26,11 +26,14 @@ const getNoteColorHex = (note?: Note) =>
     <button
       v-for="c in NOTE_COLORS"
       :key="c.name"
-      class="w-6 h-6 rounded-full border border-black/10 transition-transform hover:scale-110"
-      :class="{
-        'ring-2 ring-offset-1 ring-[#1d1d1f] scale-110':
-          getNoteColorHex(notes.find((n) => n.id === noteId)) === c.hex,
-      }"
+      class="w-6 h-6 rounded-full border transition-transform hover:scale-110"
+      :class="[
+        c.hex.toLowerCase() === '#ffffff' ? 'border-black/30' : 'border-black/10',
+        {
+          'ring-2 ring-offset-1 ring-[#1d1d1f] scale-110':
+            getNoteColorHex(notes.find((n) => n.id === noteId)) === c.hex,
+        },
+      ]"
       :style="{ background: c.hex }"
       :title="c.name"
       @click="emit('setColor', noteId, c.value)"

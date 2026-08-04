@@ -249,11 +249,7 @@ onUnmounted(() => {
       v-show="!currentNote"
       class="flex-1 h-full flex flex-col items-center justify-center text-[#86868b] gap-3"
     >
-      <img
-        src="/logo.png"
-        alt="Logo"
-        class="w-20 h-20 rounded-2xl shadow-[0_4px_16px_rgba(0,0,0,0.06)]"
-      />
+     
       <p class="text-[14px] mt-1">未选择便签</p>
       <p class="text-[12px] text-[#c7c7cc]">
         点击右上角 + 新建，或点击左侧头像登录开启云同步

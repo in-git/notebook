@@ -201,7 +201,7 @@ onUnmounted(() => {
       @click.stop
     >
       <div
-        class="px-6 flex justify-between items-center border-b border-black/[0.06] shrink-0"
+        class="px-6 flex justify-between items-center border-b border-black/[0.06] shrink-0 pt-3"
       >
         <h3
           class="text-lg font-semibold text-[#1d1d1f] flex items-center gap-2"
@@ -222,7 +222,7 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <div class="px-6 pb-5 space-y-5 overflow-y-auto">
+      <div class="px-6 pb-5 space-y-5 overflow-y-auto ">
         <!-- 账户区域 -->
         <div v-if="!isLoggedIn">
           <div class="flex items-center gap-2 mb-3">

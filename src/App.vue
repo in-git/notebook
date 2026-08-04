@@ -7,6 +7,10 @@ import SettingsModal from './components/SettingsModal.vue';
 import Sidebar from './components/Sidebar.vue';
 import Toast from './components/Toast.vue';
 import { ApiError, aiApi, authApi, userNoteApi } from './lib/api';
+import {
+  hasLocalImages,
+  migrateLocalNotesImages,
+} from './lib/imageMigration';
 import { sm2Encrypt } from './lib/sm2';
 import {
   clearAuth,
@@ -279,8 +283,22 @@ const loadUserData = async () => {
             const normalized = localNotes.map((n: Note, i: number) =>
               ensureNoteShape(n, i),
             );
-            await userNoteApi.saveNote({ notes: normalized }, userId);
-            remoteNotes = normalized;
+            // 登录后迁移：把本地内嵌图片（base64）上传到服务器并替换地址
+            let toSync = normalized;
+            if (hasLocalImages(normalized)) {
+              try {
+                const migrated = await migrateLocalNotesImages(normalized);
+                if (migrated.length > 0) {
+                  // 用迁移后的笔记（图片已替换为网络地址）覆盖原本地笔记
+                  const byId = new Map(migrated.map((n) => [n.id, n]));
+                  toSync = normalized.map((n) => byId.get(n.id) || n);
+                }
+              } catch (e) {
+                console.warn('本地图片迁移失败，仍按原内容同步:', e);
+              }
+            }
+            await userNoteApi.saveNote({ notes: toSync }, userId);
+            remoteNotes = toSync;
             localStorage.removeItem(LOCAL_NOTES_KEY);
             showToast('已同步本地便签到云端');
           }

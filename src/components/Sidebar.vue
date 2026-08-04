@@ -85,7 +85,7 @@ const getPlainSnippet = (htmlBody: string) => {
             alt="Logo"
             class="w-8 h-8 rounded-lg shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
           />
-          <span class="text-[14px] text-[#86868b]">未登录 · 本地模式</span>
+          <span class="text-[14px] text-[#86868b] px-4">未登录 · 本地模式</span>
         </template>
       </button>
       <div class="flex items-center gap-1">
@@ -140,11 +140,14 @@ const getPlainSnippet = (htmlBody: string) => {
       <button
         v-for="f in colorFilters"
         :key="f.name"
-        class="shrink-0 w-5 h-5 rounded-full border border-black/10 transition-transform hover:scale-110"
-        :class="{
-          'ring-2 ring-offset-1 ring-[#1d1d1f] scale-110':
-            activeColorFilter === f.filter,
-        }"
+        class="shrink-0 w-5 h-5 rounded-full border transition-transform hover:scale-110"
+        :class="[
+          f.hex && f.hex.toLowerCase() === '#ffffff' ? 'border-black/30' : 'border-black/10',
+          {
+            'ring-2 ring-offset-1 ring-[#1d1d1f] scale-110':
+              activeColorFilter === f.filter,
+          },
+        ]"
         :title="f.name"
         :style="{
           background:
