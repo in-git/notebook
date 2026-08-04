@@ -180,6 +180,17 @@ const loadLocalData = () => {
   } catch (e) {
     console.error('读取本地笔记失败:', e);
   }
+  // 用户备注文件不存在
+  if (notes.value.length === 0) {
+    // @ts-ignore
+    window.antd?.message.warning('用户备注文件不存在，请重新登录或创建新便签');
+    // @ts-ignore
+    window.antd?.Modal.warning({
+      title: '提示',
+      content: '用户备注文件不存在，请重新登录或创建新便签',
+      okText: '知道了',
+    });
+  }
   if (notes.value.length > 0 && currentNoteId.value === null) {
     currentNoteId.value = notes.value[0].id;
   }
@@ -273,45 +284,81 @@ const loadUserData = async () => {
     }
     remoteNotes = remoteNotes.map((n, i) => ensureNoteShape(n, i));
 
-    // 业务接口为空但本地有数据 → 上传本地（迁移）
-    if (remoteNotes.length === 0) {
-      const localRaw = localStorage.getItem(LOCAL_NOTES_KEY);
-      if (localRaw) {
-        try {
-          const localNotes = JSON.parse(localRaw);
-          if (Array.isArray(localNotes) && localNotes.length > 0) {
-            const normalized = localNotes.map((n: Note, i: number) =>
-              ensureNoteShape(n, i),
-            );
-            // 登录后迁移：把本地内嵌图片（base64）上传到服务器并替换地址
-            let toSync = normalized;
-            if (hasLocalImages(normalized)) {
-              try {
-                const migrated = await migrateLocalNotesImages(normalized);
-                if (migrated.length > 0) {
-                  // 用迁移后的笔记（图片已替换为网络地址）覆盖原本地笔记
-                  const byId = new Map(migrated.map((n) => [n.id, n]));
-                  toSync = normalized.map((n) => byId.get(n.id) || n);
-                }
-              } catch (e) {
-                console.warn('本地图片迁移失败，仍按原内容同步:', e);
-              }
-            }
-            await userNoteApi.saveNote({ notes: toSync }, userId);
-            remoteNotes = toSync;
-            localStorage.removeItem(LOCAL_NOTES_KEY);
-            showToast('已同步本地便签到云端');
-          }
-        } catch (e) {
-          // 忽略
+    // 获取本地数据
+    const localRaw = localStorage.getItem(LOCAL_NOTES_KEY);
+    let localNotes: Note[] = [];
+    if (localRaw) {
+      try {
+        const parsed = JSON.parse(localRaw);
+        if (Array.isArray(parsed)) {
+          localNotes = parsed.map((n: Note, i: number) => ensureNoteShape(n, i));
         }
+      } catch (e) {
+        console.error('解析本地笔记失败:', e);
       }
-    } else {
+    }
+
+    // 处理本地图片迁移：将 base64 图片上传到云端并替换为 webp URL
+    const migrateLocalImages = async (notesToMigrate: Note[]): Promise<Note[]> => {
+      if (!hasLocalImages(notesToMigrate)) {
+        return notesToMigrate;
+      }
+      try {
+        const migrated = await migrateLocalNotesImages(notesToMigrate);
+        if (migrated.length > 0) {
+          const byId = new Map(migrated.map((n) => [n.id, n]));
+          return notesToMigrate.map((n) => byId.get(n.id) || n);
+        }
+      } catch (e) {
+        console.warn('本地图片迁移失败，仍按原内容同步:', e);
+      }
+      return notesToMigrate;
+    };
+
+    // 情况1：云端有数据，本地也有数据 → 合并，全部保留
+    if (remoteNotes.length > 0 && localNotes.length > 0) {
+      // 先处理本地图片，上传到云端转成 webp 路径
+      const migratedLocalNotes = await migrateLocalImages(localNotes);
+      // 合并：本地 + 云端（去重，相同 ID 保留本地的更新）
+      const remoteById = new Map(remoteNotes.map((n) => [n.id, n]));
+      const mergedNotes = [...remoteNotes];
+      for (const localNote of migratedLocalNotes) {
+        if (!remoteById.has(localNote.id)) {
+          mergedNotes.push(localNote);
+        }
+        // 如果云端已有，保留云端的（或者可以取最新更新的，这里保留云端）
+      }
+      // 保存合并后的数据到云端
+      await userNoteApi.saveNote({ notes: mergedNotes }, userId);
+      notes.value = mergedNotes;
+      localStorage.removeItem(LOCAL_NOTES_KEY);
+      showToast(`已合并便签，云端 ${remoteNotes.length} 条 + 本地 ${localNotes.length} 条`);
+    }
+    // 情况2：云端没有数据，本地有数据 → 直接上传本地到云端
+    else if (remoteNotes.length === 0 && localNotes.length > 0) {
+      // 先处理本地图片，上传到云端转成 webp 路径
+      const migratedLocalNotes = await migrateLocalImages(localNotes);
+      await userNoteApi.saveNote({ notes: migratedLocalNotes }, userId);
+      notes.value = migratedLocalNotes;
+      localStorage.removeItem(LOCAL_NOTES_KEY);
+      showToast('已同步本地便签到云端');
+    }
+    // 情况3：本地有数据，云端没有数据 → 存本地，图片转 webp 格式
+    else if (localNotes.length > 0) {
+      // 本地有但云端无（其实被上面覆盖了，这里是备用分支）
+      const migratedLocalNotes = await migrateLocalImages(localNotes);
+      // 保存到 localStorage（图片已转 webp）
+      localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(migratedLocalNotes));
+      notes.value = migratedLocalNotes;
+      showToast('已处理本地图片为 webp 格式');
+    }
+    // 情况4：都没有数据 → 使用云端数据（空数组）
+    else {
+      notes.value = remoteNotes;
       localStorage.removeItem(LOCAL_NOTES_KEY);
     }
 
-    notes.value = remoteNotes;
-    currentNoteId.value = remoteNotes.length > 0 ? remoteNotes[0].id : null;
+    currentNoteId.value = notes.value.length > 0 ? notes.value[0].id : null;
     if (currentNote.value) {
       currentTitle.value = currentNote.value.title || '';
     }
