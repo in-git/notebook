@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import ColorPopover from './components/ColorPopover.vue';
 import CustomAlert from './components/CustomAlert.vue';
 import EditorWorkspace from './components/EditorWorkspace.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import Sidebar from './components/Sidebar.vue';
 import Toast from './components/Toast.vue';
-import { ApiError, aiApi, authApi, userNoteApi } from './lib/api';
-import {
-  hasLocalImages,
-  migrateLocalNotesImages,
-} from './lib/imageMigration';
+import { useNotesStore } from './stores/notes';
+import { aiApi, ApiError, authApi, userNoteApi } from './lib/api';
+import { hasLocalImages, migrateLocalNotesImages } from './lib/imageMigration';
 import { sm2Encrypt } from './lib/sm2';
 import {
   clearAuth,
@@ -18,14 +17,16 @@ import {
   getToken,
   getUserId,
   getUserInfo,
-  LOCAL_NOTES_KEY,
   setRememberedAccount as persistRememberedAccount,
   setToken,
   setUserInfo,
 } from './lib/storage';
 import type { Note, User } from './types/note';
 
-const notes = ref<Note[]>([]);
+// 使用 pinia store 管理便签数据，本地持久化由 pinia-plugin-persistedstate 完成
+const notesStore = useNotesStore();
+const { notes } = storeToRefs(notesStore);
+
 const currentNoteId = ref<number | null>(null);
 const searchKeyword = ref('');
 const activeColorFilter = ref<string | null>(null);
@@ -110,13 +111,9 @@ const saveNotes = () => {
 const canSyncBusiness = () => !!getToken();
 
 const persistNotes = async () => {
-  // 本地模式：写入 localStorage
+  // 本地模式：store 持有响应式数据，pinia-plugin-persistedstate
+  // 会在状态变更后自动写入 localStorage，这里无需额外操作
   if (!canSyncBusiness()) {
-    try {
-      localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(notes.value));
-    } catch (e) {
-      console.error('保存到本地失败:', e);
-    }
     return;
   }
   // 云端模式：调用便签接口（/dev/userNote/save，需 userId）
@@ -128,6 +125,8 @@ const persistNotes = async () => {
 };
 
 const flushNotesBeacon = () => {
+  // 关页面前最后一次保存：本地模式由 pinia 持久化插件自动写入；
+  // 云端模式 sendBeacon 不便携带 token 头，因此仅触发 persistNotes。
   if (canSyncBusiness() && notes.value.length > 0) {
     try {
       const blob = new Blob([JSON.stringify({ notes: notes.value })], {
@@ -139,12 +138,7 @@ const flushNotesBeacon = () => {
       // 忽略
     }
   }
-  // 同步写 localStorage 兜底
-  try {
-    localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(notes.value));
-  } catch (e) {
-    // 忽略
-  }
+  // pinia-plugin-persistedstate 已订阅状态变更自动落盘，无需手动写 localStorage
 };
 
 window.addEventListener('beforeunload', flushNotesBeacon);
@@ -168,18 +162,11 @@ const closeCustomAlert = () => {
 };
 
 // 加载本地存储（未登录 / 未配置业务 baseURL 时）
+// pinia-plugin-persistedstate 在应用启动时已自动把 localStorage 数据
+// 注入到 store；这里仅做一次历史数据迁移和空便签提示。
 const loadLocalData = () => {
-  try {
-    const raw = localStorage.getItem(LOCAL_NOTES_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        notes.value = parsed.map((n: Note, i: number) => ensureNoteShape(n, i));
-      }
-    }
-  } catch (e) {
-    console.error('读取本地笔记失败:', e);
-  }
+  // 迁移历史 localStorage 数据（若存在且 store 为空）
+  notesStore.migrateLegacy();
   // 用户备注文件不存在
   if (notes.value.length === 0) {
     // @ts-ignore
@@ -198,11 +185,7 @@ const loadLocalData = () => {
 
 // 启动时清理空便签
 const cleanupEmptyNotes = () => {
-  notes.value = notes.value.filter((n) => {
-    const hasTitle = (n.title || '').trim().length > 0;
-    const hasBody = getPlainSnippet(n.body || '').length > 0;
-    return hasTitle || hasBody;
-  });
+  notesStore.cleanupEmpty();
   if (
     currentNoteId.value &&
     !notes.value.find((n) => n.id === currentNoteId.value)
@@ -227,7 +210,7 @@ const afterLogin = async (fallbackUser: User) => {
     const username =
       (typeof inner.username === 'string' && inner.username) ||
       (typeof inner.nickName === 'string' && inner.nickName) ||
-          (typeof inner.nickname === 'string' && inner.nickname) ||
+      (typeof inner.nickname === 'string' && inner.nickname) ||
       (typeof inner.name === 'string' && inner.name) ||
       fallbackUser.username;
     const account =
@@ -270,7 +253,9 @@ const loadUserData = async () => {
       throw new ApiError(0, '未获取到用户 ID，无法加载便签');
     }
 
-    const noteResult = await userNoteApi.getNote<{ notes?: Note[] } | Note[] | null>(userId);
+    const noteResult = await userNoteApi.getNote<
+      { notes?: Note[] } | Note[] | null
+    >(userId);
 
     let remoteNotes: Note[] = [];
     const noteData = noteResult.data;
@@ -284,22 +269,16 @@ const loadUserData = async () => {
     }
     remoteNotes = remoteNotes.map((n, i) => ensureNoteShape(n, i));
 
-    // 获取本地数据
-    const localRaw = localStorage.getItem(LOCAL_NOTES_KEY);
+    // 获取本地数据（store 已由 pinia-plugin-persistedstate 自动加载）
     let localNotes: Note[] = [];
-    if (localRaw) {
-      try {
-        const parsed = JSON.parse(localRaw);
-        if (Array.isArray(parsed)) {
-          localNotes = parsed.map((n: Note, i: number) => ensureNoteShape(n, i));
-        }
-      } catch (e) {
-        console.error('解析本地笔记失败:', e);
-      }
+    if (notes.value.length > 0) {
+      localNotes = notes.value.map((n, i) => ensureNoteShape(n, i));
     }
 
     // 处理本地图片迁移：将 base64 图片上传到云端并替换为 webp URL
-    const migrateLocalImages = async (notesToMigrate: Note[]): Promise<Note[]> => {
+    const migrateLocalImages = async (
+      notesToMigrate: Note[],
+    ): Promise<Note[]> => {
       if (!hasLocalImages(notesToMigrate)) {
         return notesToMigrate;
       }
@@ -330,32 +309,33 @@ const loadUserData = async () => {
       }
       // 保存合并后的数据到云端
       await userNoteApi.saveNote({ notes: mergedNotes }, userId);
-      notes.value = mergedNotes;
-      localStorage.removeItem(LOCAL_NOTES_KEY);
-      showToast(`已合并便签，云端 ${remoteNotes.length} 条 + 本地 ${localNotes.length} 条`);
+      notesStore.setNotes(mergedNotes);
+      notesStore.clearPersisted();
+      showToast(
+        `已合并便签，云端 ${remoteNotes.length} 条 + 本地 ${localNotes.length} 条`,
+      );
     }
     // 情况2：云端没有数据，本地有数据 → 直接上传本地到云端
     else if (remoteNotes.length === 0 && localNotes.length > 0) {
       // 先处理本地图片，上传到云端转成 webp 路径
       const migratedLocalNotes = await migrateLocalImages(localNotes);
       await userNoteApi.saveNote({ notes: migratedLocalNotes }, userId);
-      notes.value = migratedLocalNotes;
-      localStorage.removeItem(LOCAL_NOTES_KEY);
+      notesStore.setNotes(migratedLocalNotes);
+      notesStore.clearPersisted();
       showToast('已同步本地便签到云端');
     }
     // 情况3：本地有数据，云端没有数据 → 存本地，图片转 webp 格式
     else if (localNotes.length > 0) {
       // 本地有但云端无（其实被上面覆盖了，这里是备用分支）
       const migratedLocalNotes = await migrateLocalImages(localNotes);
-      // 保存到 localStorage（图片已转 webp）
-      localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(migratedLocalNotes));
-      notes.value = migratedLocalNotes;
+      // 保存到 store（pinia 持久化插件会自动写入 localStorage，图片已转 webp）
+      notesStore.setNotes(migratedLocalNotes);
       showToast('已处理本地图片为 webp 格式');
     }
     // 情况4：都没有数据 → 使用云端数据（空数组）
     else {
-      notes.value = remoteNotes;
-      localStorage.removeItem(LOCAL_NOTES_KEY);
+      notesStore.setNotes(remoteNotes);
+      notesStore.clearPersisted();
     }
 
     currentNoteId.value = notes.value.length > 0 ? notes.value[0].id : null;
@@ -447,7 +427,12 @@ const handleAuthSubmit = async (params: {
 
     showToast('登录成功');
   } catch (e) {
-    const msg = e instanceof ApiError ? e.message : (params.mode === 'register' ? '注册失败，请重试' : '登录失败，请重试');
+    const msg =
+      e instanceof ApiError
+        ? e.message
+        : params.mode === 'register'
+          ? '注册失败，请重试'
+          : '登录失败，请重试';
     // 回传错误到 SettingsModal 展示
     settingsModalRef.value?.setError(msg);
     // 文档第一章：登录失败且验证码开启 → 主动刷新图形验证码
@@ -467,9 +452,8 @@ const logout = async () => {
   try {
     if (canSyncBusiness() && notes.value.length > 0) {
       await persistNotes();
-    } else {
-      localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(notes.value));
     }
+    // 本地模式：store 数据由 pinia-plugin-persistedstate 自动写入 localStorage
   } catch (e) {
     // 忽略
   }
@@ -524,7 +508,7 @@ const onTitleInput = () => {
 };
 
 const deleteNoteById = (id: number) => {
-  notes.value = notes.value.filter((n) => n.id !== id);
+  notesStore.deleteNote(id);
   if (currentNoteId.value === id) {
     currentNoteId.value = notes.value.length > 0 ? notes.value[0].id : null;
   }
@@ -654,7 +638,10 @@ const handleManualAiTitle = () => {
   }
   const plainText = getPlainSnippet(currentNote.value.body);
   if (!plainText) {
-    showCustomAlert('无法生成标题', '便签内容为空，请先输入内容后再使用 AI 标题');
+    showCustomAlert(
+      '无法生成标题',
+      '便签内容为空，请先输入内容后再使用 AI 标题',
+    );
     return;
   }
   if (plainText.length < 10) {
@@ -722,28 +709,10 @@ const onDrop = (event: DragEvent, targetNote: Note) => {
 
   if (!dragSourceId || targetNote.id === dragSourceId) return;
 
-  const sourceNote = notes.value.find((n) => n.id === dragSourceId);
-  if (!sourceNote || sourceNote.pinned !== targetNote.pinned) return;
-
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
   const isBefore = event.clientY < rect.top + rect.height / 2;
 
-  notes.value.sort((a, b) => {
-    if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
-    return a.order - b.order;
-  });
-
-  const sourceIdx = notes.value.findIndex((n) => n.id === sourceNote.id);
-  notes.value.splice(sourceIdx, 1);
-
-  let targetIdx = notes.value.findIndex((n) => n.id === targetNote.id);
-  if (!isBefore) targetIdx += 1;
-
-  notes.value.splice(targetIdx, 0, sourceNote);
-  notes.value.forEach((n, i) => {
-    n.order = i;
-  });
-
+  notesStore.reorderAfterDrop(dragSourceId, targetNote.id, isBefore);
   saveNotes();
 };
 
