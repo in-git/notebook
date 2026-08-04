@@ -24,14 +24,17 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'saveConfig'): void;
-  (e: 'submitAuth', params: {
-    mode: 'login' | 'register';
-    account: string;
-    password: string;
-    validCode?: string;
-    validCodeReqNo?: string;
-    rememberAccount: boolean;
-  }): void;
+  (
+    e: 'submitAuth',
+    params: {
+      mode: 'login' | 'register';
+      account: string;
+      password: string;
+      validCode?: string;
+      validCodeReqNo?: string;
+      rememberAccount: boolean;
+    },
+  ): void;
   (e: 'logout'): void;
 }>();
 
@@ -62,7 +65,8 @@ const isPasswordValid = computed(() => {
 });
 const isConfirmValid = computed(() =>
   mode.value === 'register'
-    ? confirmPassword.value === password.value && confirmPassword.value.length >= 6
+    ? confirmPassword.value === password.value &&
+      confirmPassword.value.length >= 6
     : true,
 );
 const isValidCodeFilled = computed(() =>
@@ -222,17 +226,10 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <div class="px-6 pb-5 space-y-5 overflow-y-auto ">
+      <div class="px-6 pb-5 space-y-5 overflow-y-auto">
         <!-- 账户区域 -->
         <div v-if="!isLoggedIn">
           <div class="flex items-center gap-2 mb-3">
-            <user
-              theme="outline"
-              size="16"
-              :stroke-width="3"
-              class="text-[#0071e3]"
-            />
-            <span class="text-[14px] font-medium text-[#1d1d1f]">账户</span>
             <span class="text-[14px] text-[#86868b] ml-1">
               登录后可在多端同步便签
             </span>
@@ -294,7 +291,9 @@ onUnmounted(() => {
                 v-model="password"
                 :type="showPassword ? 'text' : 'password'"
                 placeholder="密码（6-20 位）"
-                :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
+                :autocomplete="
+                  mode === 'register' ? 'new-password' : 'current-password'
+                "
                 class="w-full bg-black/[0.04] border-none rounded-xl pl-9 pr-10 py-2.5 text-[14px] text-[#1d1d1f] placeholder-[#86868b] outline-none focus:bg-black/[0.06] transition"
               />
               <button
@@ -382,7 +381,10 @@ onUnmounted(() => {
             </div>
 
             <!-- 记住账号（仅登录） -->
-            <label v-if="mode === 'login'" class="flex items-center gap-2 cursor-pointer pl-1">
+            <label
+              v-if="mode === 'login'"
+              class="flex items-center gap-2 cursor-pointer pl-1"
+            >
               <input
                 v-model="rememberMe"
                 type="checkbox"
@@ -391,10 +393,7 @@ onUnmounted(() => {
               <span class="text-[14px] text-[#86868b]">记住账号</span>
             </label>
 
-            <div
-              v-if="authError"
-              class="text-[14px] text-[#ff3b30] pl-1"
-            >
+            <div v-if="authError" class="text-[14px] text-[#ff3b30] pl-1">
               {{ authError }}
             </div>
 
@@ -455,7 +454,12 @@ onUnmounted(() => {
                 class="text-[14px] flex items-center gap-1"
                 :class="cloudMode ? 'text-[#34c759]' : 'text-[#86868b]'"
               >
-                <check v-if="cloudMode" theme="outline" size="10" :stroke-width="4" />
+                <check
+                  v-if="cloudMode"
+                  theme="outline"
+                  size="10"
+                  :stroke-width="4"
+                />
                 <span>{{
                   cloudMode ? '已登录 · 云端同步中' : '已登录 · 本地模式'
                 }}</span>

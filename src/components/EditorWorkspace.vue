@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref, onUnmounted } from 'vue';
-import { Copy, Delete, Magic } from '@icon-park/vue-next';
+import {
+  Copy,
+  Delete,
+  Loading,
+  LoadingFour,
+  LoadingThree,
+  Magic,
+} from '@icon-park/vue-next';
 import { AiEditor } from 'aieditor';
 import 'aieditor/dist/style.css';
 import { fileApi } from '../lib/api';
@@ -96,9 +103,7 @@ const fileToDataUrl = (file: File): Promise<string> =>
 //   - 已登录：调用 /client/c/fileFolder/upload（对接文档：md/C端文件上传对接文档.md），返回云端 URL
 //   - 未登录：转 base64 data URL 嵌入笔记（随文本一起存 localStorage）
 // AiEditor 要求 uploader 返回 { errorCode: 0, data: { src, alt, ... } }
-const imageUploader = async (
-  file: File,
-): Promise<Record<string, unknown>> => {
+const imageUploader = async (file: File): Promise<Record<string, unknown>> => {
   // 前端预校验：后缀白名单 + 大小（文档第七章硬约束 5/6）
   const extErr = fileApi.validateImageExt(file);
   if (extErr) {
@@ -181,7 +186,12 @@ onUnmounted(() => {
             :class="{ 'ai-btn-loading': aiSummaryInProgress }"
             @click="emit('manualAiSummary')"
           >
-            <magic theme="outline" size="15" :stroke-width="3" class="ai-icon" />
+            <loading-three
+              theme="outline"
+              size="15"
+              :stroke-width="3"
+              class="ai-icon"
+            />
             AI 标题
           </button>
         </a-tooltip>
@@ -205,10 +215,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 编辑器主体 -->
-    <div
-      v-show="currentNote"
-      class="h-full flex flex-col px-4 overflow-auto"
-    >
+    <div v-show="currentNote" class="h-full flex flex-col px-4 overflow-auto">
       <div class="flex-1 flex flex-col gap-4 overflow-hidden pt-4">
         <input
           type="text"
@@ -249,7 +256,6 @@ onUnmounted(() => {
       v-show="!currentNote"
       class="flex-1 h-full flex flex-col items-center justify-center text-[#86868b] gap-3"
     >
-     
       <p class="text-[14px] mt-1">未选择便签</p>
       <p class="text-[12px] text-[#c7c7cc]">
         点击右上角 + 新建，或点击左侧头像登录开启云同步
