@@ -131,14 +131,19 @@ export const useNotesStore = defineStore('notes', {
       this.notes = arr;
     },
 
-    /** 清空持久化的本地数据（云端同步成功后调用） */
+    /**
+     * 清空持久化的本地数据（云端同步成功后调用）
+     * 仅移除 localStorage 中的 key，避免下次启动重复迁移历史数据。
+     * 注意：不要清空内存中的 this.notes，否则合并结果会丢失、界面显示为空。
+     * pinia-plugin-persistedstate 仍会把当前内存数据写回该 key，
+     * 云端模式下以云端为准，本地副本仅作缓存。
+     */
     clearPersisted() {
       try {
         localStorage.removeItem(LOCAL_NOTES_KEY);
       } catch {
         /* noop */
       }
-      this.notes = [];
     },
   },
   persist: {

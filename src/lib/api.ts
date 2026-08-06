@@ -2,19 +2,16 @@
 // 登录类接口前缀 /auth/c/（对接文档第八章）
 // 业务接口前缀 /api/（笔记 / AI 配置 / AI 总结 / 图片上传）
 // baseURL 根据环境自动切换：
-//   - 开发（vite dev）：http://localhost:82
-//   - 生产（vite build）：https://aab2b9dab7609fdb2.sh7.agentos-app.net/api
-// 也可通过 .env 的 VITE_API_BASE 覆盖
+//   - 开发（vite dev）：VITE_API_BASE_DEV，缺省 http://localhost:82
+//   - 生产（vite build）：VITE_API_BASE_PROD，缺省 https://aab2b9dab7609fdb2.sh7.agentos-app.net/api
+// 优先级：VITE_API_BASE（通用覆盖）> 按环境的 VITE_API_BASE_DEV / VITE_API_BASE_PROD > 内置缺省值
 
 import { clearToken, getToken, getUserId } from './storage';
 
 // ========== 基础配置 ==========
-const PROD_API_BASE = 'https://aab2b9dab7609fdb2.sh7.agentos-app.net/api';
-const DEV_API_BASE = 'http://localhost:82';
+const DEFAULT_PROD_API_BASE = 'https://aab2b9dab7609fdb2.sh7.agentos-app.net/api';
 
-export const AUTH_API_BASE: string =
-  import.meta.env.VITE_API_BASE ||
-  (import.meta.env.DEV ? DEV_API_BASE : PROD_API_BASE);
+export const AUTH_API_BASE: string =import.meta.env.VITE_API_BASE_DEV||DEFAULT_PROD_API_BASE
 
 // ========== 错误类型 ==========
 export class ApiError extends Error {

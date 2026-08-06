@@ -4,9 +4,9 @@ import vue from '@vitejs/plugin-vue';
 
 // 前端纯静态，不再代理后端。
 // 接口 baseURL 由 src/lib/api.ts 根据环境自动切换：
-//   - 开发（vite dev）：http://localhost:82
-//   - 生产（vite build）：https://aab2b9dab7609fdb2.sh7.agentos-app.net/api
-// 可用项目根目录 .env 的 VITE_API_BASE 覆盖。
+//   - 开发（vite dev）：VITE_API_BASE_DEV，缺省 http://localhost:82
+//   - 生产（vite build）：VITE_API_BASE_PROD，缺省 https://aab2b9dab7609fdb2.sh7.agentos-app.net/api
+// 可用项目根目录 .env 的 VITE_API_BASE（通用）、VITE_API_BASE_DEV / VITE_API_BASE_PROD（分环境）覆盖。
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -15,7 +15,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 17842,
     strictPort: true,
   },
   build: {

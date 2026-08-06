@@ -298,14 +298,29 @@ const loadUserData = async () => {
     if (remoteNotes.length > 0 && localNotes.length > 0) {
       // 先处理本地图片，上传到云端转成 webp 路径
       const migratedLocalNotes = await migrateLocalImages(localNotes);
-      // 合并：本地 + 云端（去重，相同 ID 保留本地的更新）
+      // 合并：本地 + 云端（去重，相同 ID 取更新时间较新者，避免直接丢弃本地）
       const remoteById = new Map(remoteNotes.map((n) => [n.id, n]));
-      const mergedNotes = [...remoteNotes];
-      for (const localNote of migratedLocalNotes) {
-        if (!remoteById.has(localNote.id)) {
-          mergedNotes.push(localNote);
+      const mergedNotes: Note[] = [];
+      const seenIds = new Set<number>();
+      const pushOnce = (note: Note) => {
+        if (!seenIds.has(note.id)) {
+          seenIds.add(note.id);
+          mergedNotes.push(note);
         }
-        // 如果云端已有，保留云端的（或者可以取最新更新的，这里保留云端）
+      };
+      remoteNotes.forEach(pushOnce);
+      for (const localNote of migratedLocalNotes) {
+        const remoteNote = remoteById.get(localNote.id);
+        if (!remoteNote) {
+          pushOnce(localNote);
+        } else {
+          const localTime = new Date(localNote.updatedAt ?? 0).getTime();
+          const remoteTime = new Date(remoteNote.updatedAt ?? 0).getTime();
+          if (localTime >= remoteTime) {
+            const idx = mergedNotes.findIndex((n) => n.id === localNote.id);
+            if (idx >= 0) mergedNotes[idx] = localNote;
+          }
+        }
       }
       // 保存合并后的数据到云端
       await userNoteApi.saveNote({ notes: mergedNotes }, userId);
@@ -324,14 +339,6 @@ const loadUserData = async () => {
       notesStore.clearPersisted();
       showToast('已同步本地便签到云端');
     }
-    // 情况3：本地有数据，云端没有数据 → 存本地，图片转 webp 格式
-    else if (localNotes.length > 0) {
-      // 本地有但云端无（其实被上面覆盖了，这里是备用分支）
-      const migratedLocalNotes = await migrateLocalImages(localNotes);
-      // 保存到 store（pinia 持久化插件会自动写入 localStorage，图片已转 webp）
-      notesStore.setNotes(migratedLocalNotes);
-      showToast('已处理本地图片为 webp 格式');
-    }
     // 情况4：都没有数据 → 使用云端数据（空数组）
     else {
       notesStore.setNotes(remoteNotes);
@@ -345,7 +352,7 @@ const loadUserData = async () => {
   } catch (e) {
     const msg =
       e instanceof ApiError ? e.message : '网络异常，无法加载云端数据';
-    showCustomAlert('加载失败', msg);
+    showToast('加载失败：' + msg);
   }
 };
 
